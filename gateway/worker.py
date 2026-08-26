@@ -7,7 +7,7 @@ exactly one audit line.
 
 Concurrency is 1 (SPEC 4.5) and it is a code constant, not config, so
 there is no environment variable anyone can raise in an incident to make
-the connector overrun AMD's per-minute caps.
+the gateway overrun AMD's per-minute caps.
 
 Nothing here performs I/O of its own. The handler awaits the client shim,
 the shim awaits send(), and send() awaits a slot on the request queue --
@@ -23,7 +23,7 @@ import logging
 import time
 from typing import Any, Callable, Mapping
 
-from connector.errors import (
+from gateway.errors import (
     ConnectorError,
     InternalError,
     QueueWaitExceeded,
@@ -33,22 +33,35 @@ from connector.errors import (
     ToolUnverified,
     map_to_connector_error,
 )
-from connector.interfaces import Caller, RegistryEntry
-from connector.queues import PRIORITY_NAMES, EntryQueue, ToolRequest
-from connector.registry import DOMAIN_PACKAGES, ToolRegistry
+from gateway.interfaces import Caller, RegistryEntry
+from gateway.queues import PRIORITY_NAMES, EntryQueue, ToolRequest
+from gateway.registry import DOMAIN_PACKAGES, ToolRegistry
 
-__all__ = ["CONCURRENCY", "Worker", "current_client", "install_client_factories"]
+__all__ = [
+    "CONCURRENCY",
+    "RAW_XML_KEYS",
+    "Worker",
+    "current_client",
+    "install_client_factories",
+    "strip_raw_xml",
+]
 
 #: SPEC 4.5: exactly one tool runs at a time. A constant, never config.
 CONCURRENCY = 1
 
-_LOG = logging.getLogger("connector.worker")
+#: SPEC 17.1: result keys that carry AMD's own XML string. Delivery needs
+#: BOTH phi and raw_xml on the token; raw_xml alone delivers nothing.
+#: `<key>_hash` is included because the Redactor leaves that sidecar
+#: behind when it blanks one of these keys.
+RAW_XML_KEYS = frozenset({"raw_xml", "rawxml"})
+
+_LOG = logging.getLogger("gateway.worker")
 
 #: The AMDClient for the record currently running. Handlers reach it
 #: through their package's _common.get_client(), whose factory is bound
 #: to this ContextVar by install_client_factories().
 current_client: contextvars.ContextVar[Any] = contextvars.ContextVar(
-    "connector_current_amd_client", default=None
+    "gateway_current_amd_client", default=None
 )
 
 
@@ -56,7 +69,7 @@ def install_client_factories(domains: Any = DOMAIN_PACKAGES) -> list[str]:
     """Point every copied domain package's client factory at the ContextVar.
 
     The domain packages expect server.build_server() to hand them a
-    factory (handlers/_common.set_client_factory). The connector has no
+    factory (handlers/_common.set_client_factory). The gateway has no
     per-domain servers, so the worker binds them once at startup to the
     one client the running record owns.
 
@@ -74,6 +87,35 @@ def install_client_factories(domains: Any = DOMAIN_PACKAGES) -> list[str]:
         setter(_client_from_context)
         wired.append(package)
     return wired
+
+
+def strip_raw_xml(payload: Any) -> Any:
+    """Remove every raw-XML key from a result, at any depth. SPEC 17.1.
+
+    Returns a payload with each RAW_XML_KEYS entry -- and the `_hash`
+    sidecar the Redactor may have left in its place -- omitted entirely,
+    rather than blanked, so a caller cannot tell a stripped result from
+    one where the handler never produced raw XML.
+    """
+    if isinstance(payload, dict):
+        out: dict[Any, Any] = {}
+        for key, value in payload.items():
+            if isinstance(key, str) and _is_raw_xml_key(key):
+                continue
+            out[key] = strip_raw_xml(value)
+        return out
+    if isinstance(payload, list):
+        return [strip_raw_xml(item) for item in payload]
+    if isinstance(payload, tuple):
+        return tuple(strip_raw_xml(item) for item in payload)
+    return payload
+
+
+def _is_raw_xml_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered in RAW_XML_KEYS:
+        return True
+    return lowered.endswith("_hash") and lowered[: -len("_hash")] in RAW_XML_KEYS
 
 
 def _client_from_context() -> Any:
@@ -100,6 +142,10 @@ class Worker:
       redactor       callable applied to a result when policy says so
       clock          optional RateClock, read only for is_peak()
       validate       optional args validator; defaults to jsonschema
+
+    A result passes two content gates before it fills the record's slot;
+    both live in _apply_result_policy and both fail closed. See there for
+    the PHI gate (SPEC 10.3) and the raw-XML gate (SPEC 17.1).
     """
 
     def __init__(
@@ -194,8 +240,7 @@ class Worker:
         error: ConnectorError | None = None
         try:
             result = await entry.handler(**record.args)
-            if self._should_redact(record):
-                result = self._redact(result)
+            result = self._apply_result_policy(record, result)
             # SPEC 11.1 meta, filled BEFORE the slot so the receiver -- which
             # wakes the instant the slot is set -- always sees it. Counts and
             # flags only; the same PHI-free values the audit line carries.
@@ -242,11 +287,42 @@ class Worker:
             return False
         return bool(self.policy.allows(caller, entry))
 
+    def _apply_result_policy(self, record: ToolRequest, result: Any) -> Any:
+        """Every content gate a result passes before it fills the slot.
+
+        Two independent gates, in this order:
+
+          1. PHI. `phi=false` on the token means the Redactor runs
+             (SPEC 10.3). An unknown caller is treated as `phi=false`.
+          2. Raw XML. AMD's XML string is delivered ONLY when the token
+             carries `phi=true` AND `raw_xml=true` (SPEC 17.1). raw_xml
+             alone delivers nothing -- the raw string is unredactable, so
+             a non-PHI token can never receive it whatever else it says.
+
+        Both fail closed: the restrictive branch is the one taken when
+        the caller cannot be resolved.
+        """
+        if self._should_redact(record):
+            result = self._redact(result)
+        if not self._may_receive_raw_xml(record):
+            result = strip_raw_xml(result)
+        return result
+
     def _should_redact(self, record: ToolRequest) -> bool:
+        """True when the Redactor must run (SPEC 10.3). Unknown -> True."""
         caller = self.caller_lookup(record.caller)
         if caller is None:
             return True
         return bool(self.policy.redact(caller))
+
+    def _may_receive_raw_xml(self, record: ToolRequest) -> bool:
+        """SPEC 17.1: phi AND raw_xml. Never raw_xml alone, never unknown."""
+        caller = self.caller_lookup(record.caller)
+        if caller is None:
+            return False
+        return bool(getattr(caller, "phi", False)) and bool(
+            getattr(caller, "raw_xml", False)
+        )
 
     def _redact(self, result: Any) -> Any:
         if self.redactor is None:

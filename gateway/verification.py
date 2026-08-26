@@ -1,6 +1,6 @@
 """Verification state, SPEC 9.2 and 9.3.
 
-Every tool the connector registers carries a verification state. Only a
+Every tool the gateway registers carries a verification state. Only a
 verified tool is served: an unverified tool is still LISTED (SPEC 9.2, so
 agents can see it exists) but the worker returns ToolUnverified without
 running the handler and without spending an AMD call.
@@ -22,7 +22,7 @@ A row is therefore NOT verified: is_verified() requires all five items,
 the live check included, so no Appendix A tool is verified in this repo
 until the operator records a date (docs/OPERATIONS.md). is_served()
 answers the separate question of whether the worker may run the handler:
-the same thing, unless CONNECTOR_SERVE_PENDING_VERIFICATION (SPEC 19) is
+the same thing, unless GATEWAY_SERVE_PENDING_VERIFICATION (SPEC 19) is
 true, in which case a row whose ONLY gap is the live check is served and
 /health reports the posture as degraded.
 """
@@ -187,10 +187,10 @@ class VerificationTable:
         *,
         serve_pending: bool = False,
     ) -> None:
-        #: SPEC 19 CONNECTOR_SERVE_PENDING_VERIFICATION. False in
+        #: SPEC 19 GATEWAY_SERVE_PENDING_VERIFICATION. False in
         #: production: a row whose only gap is the operator live check is
         #: NOT served and the worker answers tool_unverified. True lets
-        #: the connector be exercised end to end before the operator runs
+        #: the gateway be exercised end to end before the operator runs
         #: the live check, and /health says so.
         self.serve_pending = bool(serve_pending)
         self._by_name: dict[str, VerifiedTool] = dict(
@@ -223,7 +223,7 @@ class VerificationTable:
         """Whether the worker may run this tool's handler.
 
         Verified tools always. Tools whose ONLY missing item is the
-        operator live check, when CONNECTOR_SERVE_PENDING_VERIFICATION is
+        operator live check, when GATEWAY_SERVE_PENDING_VERIFICATION is
         true. Nothing else.
         """
         row = self.get(name)

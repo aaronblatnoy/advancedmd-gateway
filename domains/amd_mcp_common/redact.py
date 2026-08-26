@@ -15,6 +15,15 @@ backwards compat with code that doesn't yet use the per-action class.
 
 See `2026-06-03-knowledge-driven-policy.md` for the action-policy
 schema this redactor consumes.
+
+The key set is deliberately fail-closed for `allow_phi=False`. AMD's own
+attribute spellings (`id`, `chart`, `memo`, `zipcode`), the search echo
+(`query`), free text nodes (`_text`) and the raw XML string (`raw_xml`)
+are all PHI, because nothing in a payload distinguishes a CPT lookup's
+`query`/`id` from a patient lookup's. The cost is that a non-PHI caller
+sees `<REDACTED>` for a code-lookup echo and a masterfile row's internal
+id; the alternative is plaintext patient names reaching an AI caller.
+Callers that need those values carry a phi=true token.
 """
 from __future__ import annotations
 
@@ -63,7 +72,8 @@ def _default_knowledge_path() -> Path | None:
     return None
 
 
-# Fallback field list (mirror of the draft's content at the time of writing).
+# Fallback field list. Mirrors knowledge/policies/phi-redaction-fields.data.json;
+# a test asserts the file is a superset of this set so the two cannot drift.
 _FALLBACK_PHI_KEYS = frozenset({
     "first_name", "firstname", "last_name", "lastname",
     "middle_name", "middlename",
@@ -84,7 +94,30 @@ _FALLBACK_PHI_KEYS = frozenset({
     "guarantor_firstname", "guarantor_lastname",
     "guarantor_dob", "guarantor_address",
     "guarantor_phone", "guarantor_ssn",
+    # The search echo. Every lookup handler repeats the caller's search
+    # string back in its result, and for a patient lookup that string IS
+    # a patient name. Nothing in the payload distinguishes a name search
+    # from a CPT search, so `query` is PHI for every tool: a non-PHI
+    # caller gets `matches` and `count`, not the echo. A PHI caller
+    # (phi=true token) sees it untouched.
+    "query", "search", "searchstring", "name",
+    # AMD's own attribute spellings, which survive verbatim in the
+    # `raw` / `_attrs` / `_child_text` echo every handler returns. The
+    # normalised aliases above only cover what a handler renamed.
+    "id", "chart", "memo", "zipcode", "zip4",
+    # AMD's raw XML string. The worker also strips this key outright
+    # unless the token carries BOTH phi and raw_xml (SPEC 17.1); the
+    # redactor covers the case where a result reaches a non-PHI caller
+    # through some other path.
+    "raw_xml", "rawxml",
 })
+
+#: Keys whose value is free text lifted straight out of AMD's XML. The
+#: redactor cannot tell a code description from a patient note, so for a
+#: non-PHI caller any non-empty string under one of these keys is
+#: redacted. Empty text is left alone -- there is nothing to leak and a
+#: hash of "" is noise.
+_FREE_TEXT_KEYS = frozenset({"_text"})
 
 _FALLBACK_STRICT_PATTERNS: tuple[str, ...] = (
     r"^.*_name$",
@@ -234,6 +267,18 @@ class Redactor:
                     return True
         return False
 
+    def is_free_text_phi(self, key: str, value: Any) -> bool:
+        """True for an AMD free-text node carrying something to leak.
+
+        Key-matching alone cannot cover `_text`: the same key holds a CPT
+        description on one node and a patient note on the next, so the
+        decision has to see the value. Empty text is not redacted.
+        """
+        k = key.lower()
+        if k in self.non_phi_keep or k not in _FREE_TEXT_KEYS:
+            return False
+        return isinstance(value, str) and bool(value.strip())
+
     def apply(
         self,
         payload: Any,
@@ -253,7 +298,9 @@ class Redactor:
             if isinstance(node, dict):
                 for k, v in node.items():
                     path = f"{prefix}.{k}" if prefix else str(k)
-                    if isinstance(k, str) and self.is_phi_key(k, strict):
+                    if isinstance(k, str) and (
+                        self.is_phi_key(k, strict) or self.is_free_text_phi(k, v)
+                    ):
                         seen.add(path)
                     visit(v, path)
             elif isinstance(node, list):
@@ -267,7 +314,9 @@ class Redactor:
         if isinstance(node, dict):
             out: dict[str, Any] = {}
             for k, v in node.items():
-                if isinstance(k, str) and self.is_phi_key(k, strict):
+                if isinstance(k, str) and (
+                    self.is_phi_key(k, strict) or self.is_free_text_phi(k, v)
+                ):
                     out[k] = _REDACTED
                     out[f"{k}_hash"] = _hmac_hash(v, hash_key)
                 else:

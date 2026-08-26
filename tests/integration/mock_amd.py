@@ -9,7 +9,7 @@ canned trees below contain obviously synthetic ids and no names.
 Three surfaces, so every lane can reuse it:
 
   MockAMD.send            an async send(XmlRequest) -> Element, the shape
-                          connector.interfaces.send declares. Drop-in for
+                          gateway.interfaces.send declares. Drop-in for
                           the conftest FakeSender.
   MockAMD.asgi_app        a raw ASGI application that accepts an XML POST
                           and answers with an XML body, for the day the
@@ -111,7 +111,7 @@ class MockAMD:
     # ------------------------------------------------------- send seam
 
     async def send(self, req: Any) -> Any:
-        """Matches connector.interfaces.send: XmlRequest -> Element."""
+        """Matches gateway.interfaces.send: XmlRequest -> Element."""
         call = MockCall(
             action=getattr(req, "action", ""),
             class_=getattr(req, "class_", ""),

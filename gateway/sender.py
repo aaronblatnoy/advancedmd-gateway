@@ -1,6 +1,6 @@
 """The sender loop, SPEC 6.4, and the frozen send() seam, SPEC 6.2.
 
-This module and connector/session.py are the ONLY two places in the
+This module and gateway/session.py are the ONLY two places in the
 repository permitted to import an HTTP client or name an AdvancedMD URL
 (SPEC 6.2, 23.6). A test greps the domains/ tree and fails on any hit.
 
@@ -25,15 +25,15 @@ from typing import Any, Awaitable, Callable
 import httpx
 from lxml import etree
 
-from connector.clock import LOGIN_TIER, tier_for
-from connector.errors import (
+from gateway.clock import LOGIN_TIER, tier_for
+from gateway.errors import (
     AmdFault,
     AmdUnavailable,
     ConnectorError,
     InternalError,
     SessionFailed,
 )
-from connector.queues import RequestQueue, XmlRequest
+from gateway.queues import RequestQueue, XmlRequest
 
 __all__ = [
     "AMD_CONTENT_TYPE",
@@ -52,7 +52,7 @@ __all__ = [
     "send",
 ]
 
-log = logging.getLogger("connector.sender")
+log = logging.getLogger("gateway.sender")
 
 #: The reference clients post ISO-8859-1 with an XML declaration and this
 #: content type. AMD rejects other encodings on some actions.
@@ -105,7 +105,7 @@ def build_xml(
 
     MUST, and each of these is a live-observed requirement:
       - msgtime is set, in AMD's format;
-      - nocookie="1" is set (the connector is not a browser and keeps no
+      - nocookie="1" is set (the gateway is not a browser and keeps no
         cookie jar);
       - the session token is a <usercontext> CHILD ELEMENT, never an
         attribute and never raw text on <ppmdmsg>. AMD's auth subsystem
@@ -412,10 +412,10 @@ async def send(req: XmlRequest) -> Element:
     Sets req.tier from the tier table (SPEC 7.4, overriding any handler
     constant), puts the request on the request queue, and awaits its slot.
 
-    Returns the parsed AMD reply tree. Raises a connector.errors
+    Returns the parsed AMD reply tree. Raises a gateway.errors
     ConnectorError -- never a transport exception, never AMD's raw body.
 
-    This is the frozen signature declared in connector/interfaces.py.
+    This is the frozen signature declared in gateway/interfaces.py.
     """
     if _QUEUE is None:
         raise InternalError()

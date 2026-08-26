@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from connector.logging_filter import (
+from gateway.logging_filter import (
     MAX_VALUE_CHARS,
     PINNED_WARNING_LOGGERS,
     REDACTED_KEYS,
@@ -79,7 +79,7 @@ def test_numbers_and_short_strings_survive():
 
 def test_a_long_message_is_redacted(captured):
     stream, _ = captured
-    logging.getLogger("connector.test").info(XML_BODY)
+    logging.getLogger("gateway.test").info(XML_BODY)
     out = stream.getvalue()
     assert REDACTION in out
     assert "PPMDResults" not in out
@@ -87,7 +87,7 @@ def test_a_long_message_is_redacted(captured):
 
 def test_a_long_format_argument_cannot_hide_behind_a_placeholder(captured):
     stream, _ = captured
-    logging.getLogger("connector.test").info("amd replied %s", XML_BODY)
+    logging.getLogger("gateway.test").info("amd replied %s", XML_BODY)
     out = stream.getvalue()
     assert "PPMDResults" not in out
     assert REDACTION in out
@@ -95,7 +95,7 @@ def test_a_long_format_argument_cannot_hide_behind_a_placeholder(captured):
 
 def test_a_short_message_survives(captured):
     stream, _ = captured
-    logging.getLogger("connector.test").info("session established")
+    logging.getLogger("gateway.test").info("session established")
     assert "session established" in stream.getvalue()
 
 
@@ -104,7 +104,7 @@ def test_a_short_message_survives(captured):
 @pytest.mark.parametrize("key", sorted(REDACTED_KEYS - {"args"}))
 def test_a_named_key_in_extra_is_redacted(key, captured):
     stream, _ = captured
-    logging.getLogger("connector.test").info(
+    logging.getLogger("gateway.test").info(
         "tool finished", extra={key: "supersecretvalue"}
     )
     assert "supersecretvalue" not in stream.getvalue()
@@ -112,7 +112,7 @@ def test_a_named_key_in_extra_is_redacted(key, captured):
 
 def test_a_dict_argument_is_walked(captured):
     stream, _ = captured
-    logging.getLogger("connector.test").info(
+    logging.getLogger("gateway.test").info(
         "call %(tool)s", {"tool": "getdemographic", "args": {"patient_id": "999999"}}
     )
     out = stream.getvalue()
@@ -122,7 +122,7 @@ def test_a_dict_argument_is_walked(captured):
 def test_debug_level_still_does_not_log_bodies(captured):
     """SPEC 17.3: even at DEBUG, bodies are not logged."""
     stream, _ = captured
-    logging.getLogger("connector.test").debug("request body: %s", XML_BODY)
+    logging.getLogger("gateway.test").debug("request body: %s", XML_BODY)
     assert "PPMDResults" not in stream.getvalue()
 
 
@@ -138,7 +138,7 @@ def test_there_is_exactly_one_handler_and_one_filter(captured):
     _, log_filter = captured
     root = logging.getLogger()
     # pytest attaches its own capture handlers; ours is the only one the
-    # connector installs, and it carries exactly one filter.
+    # gateway installs, and it carries exactly one filter.
     ours = [h for h in root.handlers if log_filter in h.filters]
     assert len(ours) == 1
     assert ours[0].filters == [log_filter]
@@ -206,7 +206,7 @@ IDENTITY_SHAPED = "patient Aaaa Bbbb dob 1/1/1900 chart AB1234"
 def test_a_traceback_never_reaches_the_stream(captured):
     """SPEC 17.3: the Formatter appends exc_info AFTER the filter runs."""
     stream, _ = captured
-    log = logging.getLogger("connector.test.exc")
+    log = logging.getLogger("gateway.test.exc")
     payload = "z" * 400
     try:
         raise ValueError(f"{IDENTITY_SHAPED} {payload}")
@@ -221,7 +221,7 @@ def test_a_traceback_never_reaches_the_stream(captured):
 
 def test_a_chained_exception_reports_class_names_only(captured):
     stream, _ = captured
-    log = logging.getLogger("connector.test.exc")
+    log = logging.getLogger("gateway.test.exc")
     try:
         try:
             raise KeyError(IDENTITY_SHAPED)

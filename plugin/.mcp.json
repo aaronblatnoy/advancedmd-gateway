@@ -8,8 +8,8 @@
         "patients"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     },
     "amd-visits": {
@@ -20,8 +20,8 @@
         "visits"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     },
     "amd-providers": {
@@ -32,8 +32,8 @@
         "providers"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     },
     "amd-codes": {
@@ -44,8 +44,8 @@
         "codes"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     },
     "amd-billing": {
@@ -56,8 +56,8 @@
         "billing"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     },
     "amd-payments": {
@@ -68,8 +68,8 @@
         "payments"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     },
     "amd-masterfiles": {
@@ -80,8 +80,8 @@
         "masterfiles"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     },
     "amd-system": {
@@ -92,8 +92,8 @@
         "system"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     },
     "amd-ehr": {
@@ -104,8 +104,8 @@
         "ehr"
       ],
       "env": {
-        "ADVANCEDMD_CONNECTOR_URL": "${ADVANCEDMD_CONNECTOR_URL}",
-        "ADVANCEDMD_CONNECTOR_TOKEN": "${ADVANCEDMD_CONNECTOR_TOKEN}"
+        "ADVANCEDMD_GATEWAY_URL": "${ADVANCEDMD_GATEWAY_URL}",
+        "ADVANCEDMD_GATEWAY_TOKEN": "${ADVANCEDMD_GATEWAY_TOKEN}"
       }
     }
   }

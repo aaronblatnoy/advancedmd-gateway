@@ -49,7 +49,7 @@ from pathlib import Path
 from lxml import etree
 
 BANNER = """
-  advancedmd-connector fixture recorder
+  advancedmd-gateway fixture recorder
   THIS CONTACTS ADVANCEDMD WITH REAL CREDENTIALS.
   Operator-only, on the box, by hand. Ctrl-C now if that is not you.
 """
@@ -236,8 +236,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---------------------------------------------------------------
     # The live call. Deliberately not implemented against a vendored
-    # client: the operator runs this inside the connector image, where
-    # connector.session and connector.sender already hold the one login
+    # client: the operator runs this inside the gateway image, where
+    # gateway.session and gateway.sender already hold the one login
     # and the one clock. Wiring it is the verification lane's job
     # (SPEC 9.3 step 2), so that a recording consumes exactly one clocked
     # AMD call and appears in the audit like any other.
@@ -245,13 +245,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         import asyncio
 
-        from connector.config import load_config
-        from connector.queues import XmlRequest
-        from connector.sender import send  # type: ignore[attr-defined]
-        from connector.session import AmdSession  # type: ignore[attr-defined]
+        from gateway.config import load_config
+        from gateway.queues import XmlRequest
+        from gateway.sender import send  # type: ignore[attr-defined]
+        from gateway.session import AmdSession  # type: ignore[attr-defined]
     except ImportError as exc:
-        print(f"error: the connector runtime is not available here ({exc.name}). "
-              "Run this inside the connector image, on black-sky.",
+        print(f"error: the gateway runtime is not available here ({exc.name}). "
+              "Run this inside the gateway image, on black-sky.",
               file=sys.stderr)
         return 3
 

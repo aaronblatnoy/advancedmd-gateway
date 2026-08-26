@@ -11,7 +11,7 @@ Every route except /health and /metrics requires a bearer token.
 
 This module imports no HTTP client and names no AdvancedMD URL
 (SPEC 6.2, 23.6): everything it needs arrives on a `Deps`
-(connector/lifecycle.py), which is the single place P2 swaps the fakes
+(gateway/lifecycle.py), which is the single place P2 swaps the fakes
 for the real singletons.
 """
 from __future__ import annotations
@@ -23,20 +23,20 @@ from typing import Any
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from connector.errors import (
+from gateway.errors import (
     BadRequest,
     ConnectorError,
     InternalError,
     LoginBucketWait,
     Unauthorized,
 )
-from connector.lifecycle import Deps, Lifecycle
-from connector.mcp_surface import mount_mcp, tool_row
-from connector.receiver import Receiver, ReceiverResponse
+from gateway.lifecycle import Deps, Lifecycle
+from gateway.mcp_surface import mount_mcp, tool_row
+from gateway.receiver import Receiver, ReceiverResponse
 
 __all__ = ["create_app", "build_app", "API_PREFIX", "bearer_token"]
 
-log = logging.getLogger("connector.app")
+log = logging.getLogger("gateway.app")
 
 #: SPEC 11.6: the path prefix is the contract version.
 API_PREFIX = "/v1"
@@ -87,7 +87,7 @@ def create_app(deps: Deps, *, lifecycle: Lifecycle | None = None) -> FastAPI:
             await life.shutdown()
 
     app = FastAPI(
-        title="advancedmd-connector",
+        title="advancedmd-gateway",
         version=deps.version,
         lifespan=lifespan,
         docs_url=None,
@@ -108,8 +108,11 @@ def create_app(deps: Deps, *, lifecycle: Lifecycle | None = None) -> FastAPI:
         except Exception:
             # Malformed JSON is a bad body, but SPEC 5.1 step 1 puts auth
             # first: an unknown token must not learn anything about the
-            # body it sent.
-            if token is None or deps.token_table.lookup(token) is None:
+            # body it sent. The same re-read the receiver does, so a
+            # revoked token gets 401 here too rather than 400.
+            try:
+                await receiver.authenticate(token)
+            except ConnectorError:
                 return _error_response(Unauthorized(), meta=_bare_meta())
             return _error_response(BadRequest(), meta=_bare_meta())
         try:
@@ -134,7 +137,7 @@ def create_app(deps: Deps, *, lifecycle: Lifecycle | None = None) -> FastAPI:
         """
         token = bearer_token(request)
         try:
-            receiver.authenticate(token)
+            await receiver.authenticate(token)
         except ConnectorError as err:
             return _error_response(err)
         try:
@@ -195,7 +198,7 @@ def create_app(deps: Deps, *, lifecycle: Lifecycle | None = None) -> FastAPI:
         """
         token = bearer_token(request)
         try:
-            caller = receiver.authenticate(token)
+            caller = await receiver.authenticate(token)
         except ConnectorError as err:
             return _error_response(err)
         # SPEC 12.4: the same row builder the MCP surface uses, so the
@@ -273,12 +276,12 @@ def build_app() -> FastAPI:
     """The production entry point: real config, real singletons.
 
     Uvicorn runs this as a factory (`uvicorn --factory
-    connector.app:build_app`) rather than a module-level `app`, so
-    importing connector.app in a test does not read the environment,
+    gateway.app:build_app`) rather than a module-level `app`, so
+    importing gateway.app in a test does not read the environment,
     open a token file, or construct an HTTP client.
     """
-    from connector.config import load_config
-    from connector.lifecycle import wire_real_deps
+    from gateway.config import load_config
+    from gateway.lifecycle import wire_real_deps
 
     return create_app(wire_real_deps(load_config()))
 
@@ -290,7 +293,7 @@ def _bare_meta() -> dict[str, Any]:
 def _fallback_metrics(deps: Deps) -> str:
     """The SPEC 18.1 gauges that this lane owns outright.
 
-    The counters and histograms belong to connector/metrics.py; until P2
+    The counters and histograms belong to gateway/metrics.py; until P2
     wires it, /metrics still answers with the queue and clock gauges so
     the endpoint is never a 404. Labels carry an instance id and a tier
     only: no caller-supplied text, no PHI.

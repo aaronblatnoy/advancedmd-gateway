@@ -10,6 +10,7 @@ Two rules hold everywhere in this suite:
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -25,10 +26,10 @@ for path in (str(REPO_ROOT), str(REPO_ROOT / "domains")):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from connector.client_shim import AMDClient  # noqa: E402
-from connector.config import Config  # noqa: E402
-from connector.interfaces import Caller, RegistryEntry  # noqa: E402
-from connector.queues import (  # noqa: E402
+from gateway.client_shim import AMDClient  # noqa: E402
+from gateway.config import Config  # noqa: E402
+from gateway.interfaces import Caller, RegistryEntry  # noqa: E402
+from gateway.queues import (  # noqa: E402
     PRIORITY_BATCH,
     PRIORITY_INTERACTIVE,
     EntryQueue,
@@ -40,6 +41,42 @@ SYNTHETIC_NOTE = (
     "synthetic fixture - hand-written from reference client XML shapes, "
     "contains no real patient data"
 )
+
+
+# ----------------------------------------------------------- record slots
+
+
+_SYNC_SLOT_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def sync_slot() -> asyncio.Future | None:
+    """A slot for a record built outside a running loop.
+
+    A record's default slot is bound to the running loop
+    (gateway.queues._new_future). Sync tests that only read record
+    fields -- build_xml shape, wait accounting, queue depth -- have no
+    running loop, so they borrow one loop that is created once per session
+    and never runs; the futures it hands out are never awaited. Inside a
+    running loop this returns None, leaving the record's own default,
+    correctly bound, in place.
+    """
+    global _SYNC_SLOT_LOOP
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        return None
+    if _SYNC_SLOT_LOOP is None or _SYNC_SLOT_LOOP.is_closed():
+        _SYNC_SLOT_LOOP = asyncio.new_event_loop()
+    return _SYNC_SLOT_LOOP.create_future()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _close_sync_slot_loop():
+    yield
+    if _SYNC_SLOT_LOOP is not None and not _SYNC_SLOT_LOOP.is_closed():
+        _SYNC_SLOT_LOOP.close()
 
 
 # --------------------------------------------------------------- clock
@@ -130,7 +167,7 @@ class FakeSession:
     async def login(self, force: bool = False) -> None:
         self.logins.append(force)
         if self.fail_next:
-            from connector.errors import SessionFailed
+            from gateway.errors import SessionFailed
 
             self.state = "degraded"
             self.token = None
@@ -311,6 +348,7 @@ def make_record(fake_clock: FakeClock):
             priority=priority,
             arrived_at=fake_clock() if arrived_at is None else arrived_at,
             max_wait_ms=max_wait_ms,
+            slot=sync_slot(),
         )
 
     return _make
@@ -320,7 +358,7 @@ BASE_ENV = {
     "AMD_USERNAME": "placeholder-user",
     "AMD_PASSWORD": "placeholder-password",
     "AMD_OFFICE_KEY": "PLACEHOLDER",
-    "CONNECTOR_TOKENS_PATH": "/data/tokens.json",
+    "GATEWAY_TOKENS_PATH": "/data/tokens.json",
 }
 
 
@@ -332,7 +370,7 @@ def base_env() -> dict[str, str]:
 
 @pytest.fixture
 def config(base_env: dict[str, str]) -> Config:
-    from connector.config import load_config
+    from gateway.config import load_config
 
     return load_config(base_env)
 
@@ -354,4 +392,4 @@ def registry_entry() -> RegistryEntry:
 
 
 __all__ = ["FakeClock", "FakeSession", "FakeSender", "FakeTokenTable",
-           "synthetic_reply", "synthetic_fault", "replace"]
+           "synthetic_reply", "synthetic_fault", "sync_slot", "replace"]

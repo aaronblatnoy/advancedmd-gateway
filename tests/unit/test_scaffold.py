@@ -9,24 +9,25 @@ import asyncio
 
 import pytest
 
-from connector.client_shim import AMDClient, amd_date
-from connector.config import ConfigError, DEFAULTS, REQUIRED, load_config
-from connector.errors import ToolArgsInvalid
-from connector.interfaces import AUDIT_KEYS, Caller, RegistryEntry
-from connector.queues import (
+from gateway.client_shim import AMDClient, amd_date
+from gateway.config import ConfigError, DEFAULTS, REQUIRED, load_config
+from gateway.errors import ToolArgsInvalid
+from gateway.interfaces import AUDIT_KEYS, Caller, RegistryEntry
+from gateway.queues import (
     PRIORITY_BATCH,
     PRIORITY_INTERACTIVE,
     EntryQueue,
     RequestQueue,
     XmlRequest,
 )
+from tests.conftest import sync_slot
 
 # ------------------------------------------------------------- config
 
 
 def test_defaults_match_spec_19(base_env):
     cfg = load_config(base_env)
-    assert cfg.connector_port == 8820
+    assert cfg.gateway_port == 8820
     assert cfg.clock_state_path == "/data/clock.json"
     assert cfg.clock_margin == 0.90
     assert cfg.execution_allowance_ms == 120000
@@ -91,7 +92,7 @@ def test_config_does_not_hardcode_an_amd_url():
     """The AMD URL lives in session.py (SPEC 6.2/23.6), not in config."""
     from pathlib import Path
 
-    src = Path(__file__).resolve().parents[2].joinpath("connector/config.py").read_text()
+    src = Path(__file__).resolve().parents[2].joinpath("gateway/config.py").read_text()
     assert "advancedmd.com" not in src
 
 
@@ -185,7 +186,7 @@ async def test_request_queue_orders_by_priority(request_queue):
 
 def test_xml_request_defaults():
     req = XmlRequest(action="getdemographic", class_="demographics",
-                     record_id="r", priority=0)
+                     record_id="r", priority=0, slot=sync_slot())
     assert req.retried_after_relogin is False
     assert req.attrs == {} and req.children == []
     assert req.tier == 3

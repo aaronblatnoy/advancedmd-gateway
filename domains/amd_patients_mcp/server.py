@@ -33,7 +33,7 @@ from mcp.server.stdio import stdio_server
 from amd_mcp_common import audit, base_server, redact, schema_loader
 from amd_mcp_common.config import Settings
 from amd_mcp_common.knowledge_loader import load_policies
-# removed: rate limiting is owned by connector/clock.py
+# removed: rate limiting is owned by gateway/clock.py
 
 from .handlers import _common as handler_common
 from .handlers import _factory
@@ -110,7 +110,7 @@ def build_server(*, settings: Settings | None = None, login: bool = True) -> Ser
     handler_common.set_client_factory(lambda: client)
 
     if login:
-        limiter = None  # removed: rate limiting is owned by connector/clock.py
+        limiter = None  # removed: rate limiting is owned by gateway/clock.py
         office = s.amd_office_key or "<no-office>"
         v = limiter.check(office, tier=1)
         if v.allow:
@@ -134,7 +134,7 @@ def build_server(*, settings: Settings | None = None, login: bool = True) -> Ser
     specs = _factory.build_specs(policies=policies, schemas=schemas)
 
     redactor = redact.Redactor()
-    limiter = None  # removed: rate limiting is owned by connector/clock.py
+    limiter = None  # removed: rate limiting is owned by gateway/clock.py
     audit_emit = audit.make_emitter(SERVER_NAME)
 
     base_server.register_all(

@@ -200,7 +200,7 @@ def configure(
     """Install the root handler, the filter, and the WARNING pins.
 
     Returns the filter so callers can assert it is the only one. Safe to
-    call twice: the previous connector handler is replaced, not stacked.
+    call twice: the previous gateway handler is replaced, not stacked.
     """
     log_filter = RedactingFilter()
     handler = logging.StreamHandler(stream) if stream is not None else logging.StreamHandler()

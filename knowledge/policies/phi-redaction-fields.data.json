@@ -1,0 +1,150 @@
+{
+  "id": "policies-phi-redaction-fields",
+  "title": "PHI fields stripped by the amd_mcp_common redactor",
+  "version": "1.0.0",
+  "last_updated": "2026-08-21",
+  "source_documents": {
+    "spec": "SPEC.md section 17.1 (data classification)",
+    "getdemographic": "knowledge/reference/amd_api/patients/getdemographic.md",
+    "lookups": "knowledge/reference/amd_api/lookups/"
+  },
+  "_note": "Read by domains/amd_mcp_common/redact.py when allow_phi=False. _FALLBACK_PHI_KEYS in that module mirrors this file; tests/invariants/test_phi_redaction_holes.py asserts this file is a superset so the two cannot drift. A loaded file REPLACES the fallback entirely, so every category, pattern and non_phi_keep entry the fallback carries must appear here.",
+  "categories": {
+    "patient_demographic": {
+      "fields": [
+        {"name": "first_name", "_source": "spec 17.1, results may contain PHI"},
+        {"name": "firstname", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "last_name", "_source": "spec 17.1"},
+        {"name": "lastname", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "middle_name", "_source": "spec 17.1"},
+        {"name": "middlename", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "dob", "_source": "spec 17.1"},
+        {"name": "date_of_birth", "_source": "spec 17.1"},
+        {"name": "birthdate", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "ssn", "_source": "spec 17.1"},
+        {"name": "social_security_number", "_source": "spec 17.1"},
+        {"name": "chart_number", "_source": "spec 17.1, AMD internal ids are patient-identifiable"},
+        {"name": "chartnumber", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "chart", "_source": "lookups, bare AMD attribute on a <patient> element"},
+        {"name": "mrn", "_source": "spec 17.1"},
+        {"name": "medical_record_number", "_source": "spec 17.1"},
+        {"name": "patient_id", "_source": "spec 17.1, AMD internal ids are patient-identifiable"},
+        {"name": "patientid", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "id", "_source": "lookups, bare AMD attribute on a <patient> element; handlers rename it to visit_id / provider_id / patient_id, so a surviving bare id is an unnormalised raw echo"},
+        {"name": "name", "_source": "lookups, bare AMD attribute carrying the patient name"}
+      ]
+    },
+    "contact": {
+      "fields": [
+        {"name": "address", "_source": "spec 17.1, HHS 18 identifiers"},
+        {"name": "address1", "_source": "spec 17.1, HHS 18 identifiers"},
+        {"name": "address2", "_source": "spec 17.1, HHS 18 identifiers"},
+        {"name": "city", "_source": "spec 17.1, geographic subdivision smaller than state"},
+        {"name": "zip", "_source": "spec 17.1, geographic subdivision smaller than state"},
+        {"name": "zipcode", "_source": "getdemographic, AMD attribute spelling of zip"},
+        {"name": "zip4", "_source": "getdemographic, AMD attribute spelling of the plus-four"},
+        {"name": "postal_code", "_source": "spec 17.1"},
+        {"name": "phone", "_source": "spec 17.1"},
+        {"name": "phone_home", "_source": "spec 17.1"},
+        {"name": "phone_cell", "_source": "spec 17.1"},
+        {"name": "phone_work", "_source": "spec 17.1"},
+        {"name": "homephone", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "cellphone", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "workphone", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "fax", "_source": "spec 17.1"},
+        {"name": "email", "_source": "spec 17.1"}
+      ]
+    },
+    "insurance_subscriber": {
+      "fields": [
+        {"name": "member_id", "_source": "spec 17.1"},
+        {"name": "memberid", "_source": "getdemographic, AMD attribute spelling"},
+        {"name": "subscriber_number", "_source": "spec 17.1"},
+        {"name": "subscriber_firstname", "_source": "spec 17.1"},
+        {"name": "subscriber_lastname", "_source": "spec 17.1"},
+        {"name": "subscriber_dob", "_source": "spec 17.1"},
+        {"name": "group_number", "_source": "spec 17.1"},
+        {"name": "policy_number", "_source": "spec 17.1"}
+      ]
+    },
+    "guarantor": {
+      "fields": [
+        {"name": "guarantor_firstname", "_source": "spec 17.1"},
+        {"name": "guarantor_lastname", "_source": "spec 17.1"},
+        {"name": "guarantor_dob", "_source": "spec 17.1"},
+        {"name": "guarantor_address", "_source": "spec 17.1"},
+        {"name": "guarantor_phone", "_source": "spec 17.1"},
+        {"name": "guarantor_ssn", "_source": "spec 17.1"}
+      ]
+    },
+    "free_text_and_echoes": {
+      "_note": "The holes a key list of normalised field names does not cover. A lookup result echoes the caller's search string, and for a patient lookup that string IS a name; AMD free text and the raw XML string can carry anything. Fail closed: a non-PHI caller keeps the structured matches, not the echo.",
+      "fields": [
+        {"name": "query", "_source": "lookups, every lookup handler returns {query, count, matches}; amd_patients_lookup_patient's query is the patient name"},
+        {"name": "search", "_source": "lookups, alternate echo key"},
+        {"name": "searchstring", "_source": "lookups, alternate echo key"},
+        {"name": "memo", "_source": "getdemographic, AMD attribute carrying free-text patient memo"},
+        {"name": "raw_xml", "_source": "spec 17.1, the raw_xml path returns AMD's XML string; gateway/worker.py additionally requires phi AND raw_xml on the token"},
+        {"name": "rawxml", "_source": "spec 17.1, alternate spelling"}
+      ]
+    }
+  },
+  "strict_mode_patterns": [
+    "^.*_name$",
+    "^.*name$",
+    "^.*_dob$",
+    "^.*ssn.*$",
+    "^.*_phone$",
+    "^.*phone$",
+    "^.*email.*$"
+  ],
+  "_strict_mode_note": "Belt and suspenders against field-list drift. With strict=true (the gateway's default) the redactor also strips keys matching any of these, case-insensitive.",
+  "free_text_keys": ["_text"],
+  "_free_text_note": "Key matching alone cannot decide _text: the same key holds a CPT description on one node and a patient note on the next. redact.py handles these value-aware -- any non-empty string is redacted, empty text is left alone. Listed here for the record; the module owns the set.",
+  "non_phi_keep": [
+    "appointment_id",
+    "appointmentid",
+    "appt_status",
+    "appt_id",
+    "visit_id",
+    "visit_status",
+    "provider_id",
+    "providerid",
+    "provider_name",
+    "provider_lastname",
+    "provider_firstname",
+    "rendering_provider_id",
+    "rendering_provider_name",
+    "referring_provider_id",
+    "referring_provider_name",
+    "location",
+    "location_id",
+    "appointment_location",
+    "appointment_type",
+    "appointment_type_id",
+    "appointment_type_name",
+    "duration_minutes",
+    "scheduled_at",
+    "scheduled_date",
+    "appointment_datetime",
+    "cpt_code",
+    "diagnosis_code",
+    "icd10",
+    "carrier_id",
+    "carrier_slug",
+    "carrier_code",
+    "carrier_name",
+    "primary_insurance_carrier_code",
+    "primary_insurance_carrier_name",
+    "amd_carrier_id",
+    "group_name",
+    "copay",
+    "copay_type",
+    "deductible",
+    "deductible_met",
+    "coinsurance",
+    "plan_type",
+    "place_of_service"
+  ],
+  "_non_phi_keep_note": "Keys that look identifying but are operationally safe: provider names are public, and appointment metadata without patient-identifying fields is not PHI on its own. Checked BEFORE the PHI set and the strict patterns, so an entry here wins."
+}

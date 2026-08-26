@@ -1,4 +1,4 @@
-# advancedmd-connector, SPEC 21.
+# advancedmd-gateway, SPEC 21.
 #
 # One service, ONE replica. Horizontal scaling is forbidden (SPEC 4.7):
 # two instances would be two rate clocks and AdvancedMD bills per excess
@@ -18,7 +18,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md* ./
-COPY connector/ ./connector/
+COPY gateway/ ./gateway/
 COPY domains/ ./domains/
 COPY knowledge/ ./knowledge/
 COPY schemas/ ./schemas/
@@ -37,4 +37,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8820/health \
       | grep -Eq '"status"[[:space:]]*:[[:space:]]*"(ok|degraded|starting)"'
 
-CMD ["uvicorn", "--factory", "connector.app:build_app", "--host", "0.0.0.0", "--port", "8820"]
+CMD ["uvicorn", "--factory", "gateway.app:build_app", "--host", "0.0.0.0", "--port", "8820"]

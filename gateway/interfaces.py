@@ -6,19 +6,19 @@ state. Changing a signature here is a change to every lane at once, so
 treat it the way SPEC 11.6 treats the HTTP contract.
 
 Implementations live where SPEC 20 says they live:
-  send        -> connector/sender.py      (SPEC 6.2)
-  RateClock   -> connector/clock.py       (SPEC 7)
-  Session     -> connector/session.py     (SPEC 8)
-  TokenTable  -> connector/tokens.py      (SPEC 10)
-  Registry    -> connector/registry.py    (SPEC 9)
-  Auditor     -> connector/audit.py       (SPEC 17.2)
+  send        -> gateway/sender.py      (SPEC 6.2)
+  RateClock   -> gateway/clock.py       (SPEC 7)
+  Session     -> gateway/session.py     (SPEC 8)
+  TokenTable  -> gateway/tokens.py      (SPEC 10)
+  Registry    -> gateway/registry.py    (SPEC 9)
+  Auditor     -> gateway/audit.py       (SPEC 17.2)
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 
-from connector.queues import ToolRequest, XmlRequest
+from gateway.queues import ToolRequest, XmlRequest
 
 __all__ = [
     "Element",
@@ -69,14 +69,14 @@ async def send(req: XmlRequest) -> Element:
     Sets req.tier from the tier table (SPEC 7.4, overriding any handler
     constant), puts the request on the request queue, and awaits its slot.
 
-    Returns the parsed AMD reply tree. Raises a connector.errors
+    Returns the parsed AMD reply tree. Raises a gateway.errors
     ConnectorError -- never a transport exception, never AMD's raw body.
 
-    This declaration is the frozen signature. connector/sender.py holds
-    the implementation and is, with connector/session.py, the only module
+    This declaration is the frozen signature. gateway/sender.py holds
+    the implementation and is, with gateway/session.py, the only module
     permitted to import an HTTP client or name an AMD URL (SPEC 23.6).
     """
-    raise NotImplementedError("connector.sender provides send()")
+    raise NotImplementedError("gateway.sender provides send()")
 
 
 class Sender(Protocol):
@@ -132,7 +132,7 @@ class Session(Protocol):
     """The one AMD session. SPEC 8.
 
     Holds the usercontext token and the regional endpoint discovered from
-    the login redirect. Only connector/sender.py and this implementation
+    the login redirect. Only gateway/sender.py and this implementation
     ever see either.
     """
 
@@ -250,7 +250,7 @@ class RegistryEntry:
     aliases: tuple[str, ...] = ()
     #: Whether the worker may run the handler. None means "same as
     #: verified"; the registry sets it explicitly so that
-    #: CONNECTOR_SERVE_PENDING_VERIFICATION can serve a tool whose only
+    #: GATEWAY_SERVE_PENDING_VERIFICATION can serve a tool whose only
     #: missing checklist item is the operator live check (SPEC 9.3 step 2).
     served: bool | None = None
     #: The SPEC 9.3 checklist as reported by GET /v1/tools, or None for a

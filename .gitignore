@@ -25,3 +25,10 @@ htmlcov/
 tokens.json.bak
 # fixture recordings land here only after operator review (SPEC 23.3)
 tests/fixtures/*.tmp.xml
+
+# R0: local pytest transcripts. They are a laptop's run, not history --
+# a stale tally committed here would be read as evidence. The real
+# evidence lives in runtime/audits/ (already ignored above).
+TESTS_LAST_RUN.txt
+TESTS_LAST_RUN.verbose.txt
+tests-last-run.txt

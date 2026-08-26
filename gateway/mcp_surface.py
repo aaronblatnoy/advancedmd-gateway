@@ -18,13 +18,14 @@ Three rules shape this module.
    ACCEPTED on tools/call.
 3. Nothing PHI-shaped is logged or put in an error. Errors are the SPEC
    14 classes, whose messages are constants; the JSON-RPC error carries
-   the connector error code and nothing else.
+   the gateway error code and nothing else.
 
-Mounting: P2 calls `mount_mcp(app, deps)` from connector/app.py. This
+Mounting: P2 calls `mount_mcp(app, deps)` from gateway/app.py. This
 module never edits or imports app.py.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
@@ -35,7 +36,7 @@ from typing import Any, Awaitable, Callable, Iterable, Mapping, Protocol
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
-from connector.errors import (
+from gateway.errors import (
     BY_CODE,
     AmdFault,
     ConnectorError,
@@ -46,8 +47,8 @@ from connector.errors import (
     ToolUnverified,
     Unauthorized,
 )
-from connector.interfaces import Caller, Registry, RegistryEntry, TokenTable
-from connector.verification import PENDING
+from gateway.interfaces import Caller, Registry, RegistryEntry, TokenTable
+from gateway.verification import PENDING
 
 __all__ = [
     "verification_view",
@@ -84,7 +85,7 @@ ROUTE_DOMAINS: tuple[str, ...] = (*DOMAINS, ALL_DOMAIN)
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
-SERVER_NAME = "advancedmd-connector"
+SERVER_NAME = "advancedmd-gateway"
 SERVER_VERSION = "1.0.0"
 
 #: SPEC 15: MCP session idle timeout, 3600 s.
@@ -112,7 +113,7 @@ _JSONRPC_BY_CONNECTOR_CODE: dict[str, int] = {
 
 
 class MCPDeps(Protocol):
-    """What the MCP surface needs from the rest of the connector.
+    """What the MCP surface needs from the rest of the gateway.
 
     P2 satisfies this with the same objects app.py already holds, so
     tools/call and POST /v1/tools run the identical receiver path.
@@ -134,7 +135,7 @@ class MCPDeps(Protocol):
         Returns the SPEC 11.1 envelope ({"ok": ..., "result": ...,
         "meta": ...}) or the bare handler result dict. Priority and
         redaction are taken from `caller`, exactly as over HTTP. Raises a
-        connector.errors.ConnectorError on failure.
+        gateway.errors.ConnectorError on failure.
         """
         ...
 
@@ -238,7 +239,7 @@ class MCPSessions:
 def tool_row(entry: RegistryEntry) -> dict[str, Any]:
     """One row of GET /v1/tools (SPEC 11.3, Amendment D-1).
 
-    Byte-identical to the row connector/app.py builds -- description
+    Byte-identical to the row gateway/app.py builds -- description
     included -- because the stdio shim sees only /v1/tools and must
     advertise the same text as this surface (SPEC 12.4).
     """
@@ -337,7 +338,7 @@ def _error(request_id: Any, code: int, message: str,
 
 
 def connector_error_to_jsonrpc(request_id: Any, err: ConnectorError) -> dict[str, Any]:
-    """SPEC 12.2: MCP error responses carry the connector error code.
+    """SPEC 12.2: MCP error responses carry the gateway error code.
 
     The message is `<code>: <constant message>`; the data object is the
     SPEC 11.1 error object. Both are PHI-free by construction (SPEC 14).
@@ -366,7 +367,7 @@ def _unwrap(envelope: Mapping[str, Any]) -> Mapping[str, Any]:
 def _token_table(deps: Any) -> TokenTable:
     """The token table, under either of the two names in the tree.
 
-    connector/lifecycle.py calls it `token_table`; the MCPDeps protocol
+    gateway/lifecycle.py calls it `token_table`; the MCPDeps protocol
     here calls it `tokens`. Accepting both keeps this module from
     forcing a rename on a lane that already landed.
     """
@@ -398,7 +399,7 @@ class _Surface:
     ) -> Mapping[str, Any]:
         """SPEC 12.2: the SAME receiver code path as POST /v1/tools.
 
-        Preferred form is a connector.receiver.Receiver, which is
+        Preferred form is a gateway.receiver.Receiver, which is
         literally the code POST /v1/tools runs -- priority, per-caller
         caps and redaction all come from the token it re-resolves. A
         `deps.call_tool` coroutine is accepted as well, for wiring that
@@ -415,14 +416,20 @@ class _Surface:
 
     # -- auth
 
-    def authenticate(self, request: Request) -> tuple[Caller, str]:
+    async def authenticate(self, request: Request) -> tuple[Caller, str]:
         header = request.headers.get("authorization") or ""
         scheme, _, token = header.partition(" ")
         if scheme.lower() != "bearer" or not token.strip():
             raise Unauthorized()
         token = token.strip()
         tokens = self.tokens
-        tokens.reload_if_changed()
+        # SPEC 10.1: re-read the table so a revocation lands on the next
+        # request. The re-read is disk I/O, so it goes to a thread rather
+        # than onto the event loop (SPEC 4.4); `reload_due` keeps the
+        # throttled common case off the thread pool.
+        due = getattr(tokens, "reload_due", None)
+        if due is None or due():
+            await asyncio.to_thread(tokens.reload_if_changed)
         caller = tokens.lookup(token)
         if caller is None:
             raise Unauthorized()
@@ -467,7 +474,7 @@ class _Surface:
                 "version": SERVER_VERSION,
             },
             "instructions": (
-                f"AdvancedMD {domain} tools, served by the connector. Tool "
+                f"AdvancedMD {domain} tools, served by the gateway. Tool "
                 "names, argument schemas and redacted result shapes are "
                 "identical to the local stdio shim."
             ),
@@ -587,7 +594,7 @@ def build_router(
 ) -> APIRouter:
     """The ten MCP routes, as a router P2 includes in app.py.
 
-    P2 owns connector/app.py; this module never edits it. Call
+    P2 owns gateway/app.py; this module never edits it. Call
     `mount_mcp(app, deps)` (below) or include this router directly.
     """
     if sessions is None:
@@ -603,7 +610,7 @@ def build_router(
 
     async def endpoint(request: Request, domain: str) -> Response:
         try:
-            caller, token = surface.authenticate(request)
+            caller, token = await surface.authenticate(request)
         except Unauthorized as err:
             return _unauthorized_response(err)
 

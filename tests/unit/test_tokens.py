@@ -7,9 +7,9 @@ import json
 
 import pytest
 
-from connector.interfaces import Caller, RegistryEntry
-from connector.queues import PRIORITY_BATCH, PRIORITY_INTERACTIVE
-from connector.tokens import (
+from gateway.interfaces import Caller, RegistryEntry
+from gateway.queues import PRIORITY_BATCH, PRIORITY_INTERACTIVE
+from gateway.tokens import (
     DEFAULT_MAX_QUEUE,
     TokenError,
     TokenTable,
@@ -237,6 +237,37 @@ def test_sighup_forces_an_immediate_reread(table_path):
     assert live.lookup(token) is not None
 
 
+def test_reload_due_reports_the_throttle_window_without_touching_disk(table_path):
+    """The async auth path uses this to stay off the thread pool.
+
+    It must be free of I/O and of side effects: asking twice may not move
+    the window, and it may not consume the SIGHUP request.
+    """
+    TokenTable.open(table_path, create=True)
+    clock = Ticker()
+    live = TokenTable(table_path, monotonic=clock)
+    live.load()
+
+    assert live.reload_due() is False
+    assert live.reload_due() is False
+
+    live.request_reload()
+    assert live.reload_due() is True
+    # Asking did not consume the request.
+    assert live.reload_if_changed() is True
+    assert live.reload_due() is False
+
+    clock.t += 31.0
+    assert live.reload_due() is True
+
+
+def test_reload_due_is_true_before_the_first_load(table_path):
+    """A table nobody has loaded yet is always due, so the first request
+    cannot be answered off a table that was never read."""
+    TokenTable.open(table_path, create=True)
+    assert TokenTable(table_path, monotonic=Ticker()).reload_due() is True
+
+
 def test_a_bad_file_on_reload_keeps_the_last_good_table(table_path):
     seed = TokenTable.open(table_path, create=True)
     token = seed.add(Caller(name="chatbot", priority=PRIORITY_INTERACTIVE))
@@ -371,5 +402,5 @@ def test_cli_revoke(table_path):
 
 
 def test_cli_needs_a_table_path(monkeypatch):
-    monkeypatch.delenv("CONNECTOR_TOKENS_PATH", raising=False)
+    monkeypatch.delenv("GATEWAY_TOKENS_PATH", raising=False)
     assert main(["tokens", "list"], stdout=io.StringIO()) == 2

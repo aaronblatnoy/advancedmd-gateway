@@ -1,22 +1,22 @@
-# AMD Connector Cutover: Locked Decisions
+# AMD Gateway Cutover: Locked Decisions
 
 Status: LOCKED 2026-08-20 (design conversation, pre-build). Supersedes
 amd-mcp-server-common/memory/decisions/2026-06-03-cross-process-rate-limit.md
 (which rejected a central daemon for v1).
 
 ## D1. One process talks to AdvancedMD
-A new service, amd-advancedmd-connector (service amd-dispatcher) (internal port 8820, same Coolify compose
+A new service, amd-advancedmd-gateway (service amd-dispatcher) (internal port 8820, same Coolify compose
 project), holds the single AMD login/session. No other container or backend
 service opens an AMD socket or holds AMD credentials.
 
 ## D2. The tool call is the only request shape
-Every request into advancedmd-connector, whether from an AI via an MCP server or
+Every request into advancedmd-gateway, whether from an AI via an MCP server or
 from a backend workflow via the SDK, is a tool call:
 
     {"tool": "getdemographic", "args": {"patient_id": "12345"}, "max_wait_ms": 30000}
     -> {"ok": true, "result": {...}, "meta": {"waited_ms", "amd_calls", "tier"}}
 
-advancedmd-connector hosts the tool registry (the existing domain handler packages)
+advancedmd-gateway hosts the tool registry (the existing domain handler packages)
 and translates tool -> one or more AMD XML requests. Nobody outside the
 dispatcher sees ppmdmsg, usercontext, msgtime, class names, or the AMD URL.
 
@@ -44,7 +44,7 @@ tool queue and interactive calls interleave. Existing tools that loop
 internally are flagged in docs/TOOL_TO_XML_MAP.md.
 
 ## D6. Return shape: JSON dict, SDK converts to existing dataclasses
-advancedmd-connector returns the handler's serialized dict. lib/advancedmd_connector in
+advancedmd-gateway returns the handler's serialized dict. lib/advancedmd_gateway in
 orlando-derm-backend keeps the workflows' existing method names
 (get_patient_bundle, get_appointments_via_reminders, get_updated_visits,
 search_patients_by_name, uploadfile, get_chart_files) as thin wrappers that
@@ -54,7 +54,7 @@ vendored clients on saved AMD responses. note-audit's raw-note path uses a
 raw flag on its token.
 
 ## D7. One token per app; policy derives from the token
-ADVANCEDMD_CONNECTOR_URL + ADVANCEDMD_CONNECTOR_TOKEN per app. The token, not a field in
+ADVANCEDMD_GATEWAY_URL + ADVANCEDMD_GATEWAY_TOKEN per app. The token, not a field in
 the body, determines: caller identity, default priority (interactive:
 admin-console, chatbot; batch: validator, srt-auths, note-audit, intake),
 allow_phi (workflows yes, AI callers no), raw_xml (note-audit), and the
@@ -63,11 +63,11 @@ write allowlist (uploadfile: intake only; default deny).
 ## D8. admin-console login is a forwarded-credential check
 /v1/login accepts user-submitted credentials, performs a metered throwaway
 login (tier 1 via the clock), returns ok/not ok. It does not reuse or
-replace advancedmd-connector's main session.
+replace advancedmd-gateway's main session.
 
 ## D9. MCP containers become forwarders
 Domain MCP servers keep their SSE ports (8801-8809) and tool schemas, stop
-constructing AMDClient, and forward each tool call to advancedmd-connector.
+constructing AMDClient, and forward each tool call to advancedmd-gateway.
 
 ## D10. Gaps to close in Phase 1
 - lookuppatient has no tool; add a handler (patients domain).
@@ -78,17 +78,17 @@ constructing AMDClient, and forward each tool call to advancedmd-connector.
 Python package renames; collapsing the 9 MCP ports; amd-portal-mcp
 (Playwright).
 
-## D11. Name: advancedmd-connector
+## D11. Name: advancedmd-gateway
 GitHub repo, Coolify app and local folder are renamed amd-mcp ->
-advancedmd-connector (not amd-connector). Backend library is
-lib/advancedmd_connector/. Env vars are ADVANCEDMD_CONNECTOR_URL and
-ADVANCEDMD_CONNECTOR_TOKEN. The compose service is still amd-dispatcher and
+advancedmd-gateway (not amd-gateway). Backend library is
+lib/advancedmd_gateway/. Env vars are ADVANCEDMD_GATEWAY_URL and
+ADVANCEDMD_GATEWAY_TOKEN. The compose service is still amd-dispatcher and
 domain subfolders keep their amd-*-mcp names.
 
 ## D12. Tool registry is verified-or-refused
 docs/TOOL_TO_XML_MAP.md (2026-08-20) shows many generated handlers call
 client.call without class_ and with non-AMD attribute names; they raise
-TypeError before reaching AMD. advancedmd-connector registers every tool but only
+TypeError before reaching AMD. advancedmd-gateway registers every tool but only
 serves tools marked verified (proven action, class, attrs, templates); an
 unverified tool returns a clear "tool not verified" error. The backend's
 vendored clients are the reference XML for the 9 workflow actions
@@ -140,9 +140,9 @@ Return path
   Nothing selects a destination at any step.
 
 Naming
-- "advancedmd-connector" is the program workflows and MCP forwarders talk
+- "advancedmd-gateway" is the program workflows and MCP forwarders talk
   to. The compose service name stays amd-dispatcher; in prose use
-  advancedmd-connector.
+  advancedmd-gateway.
 
 ## D14. Rate clock parameters (from AMD API Documentation, "API Usage Restrictions")
 Per office key, sliding 60-second window, limit looked up at each send from
@@ -168,7 +168,7 @@ request fails with a clear error; never loop. Proactive refresh is deferred
 until the audit log shows 1025 landing on interactive calls.
 
 ## D16. New repository, amd-mcp untouched (supersedes Phase 0 rename and D11's rename clause)
-advancedmd-connector is a new repo, new Coolify project, new local folder.
+advancedmd-gateway is a new repo, new Coolify project, new local folder.
 amd-mcp and its nine containers on 8801-8809 are not modified; they keep
 serving until every consumer has moved, then they are stopped. The nine
 domain packages, policies, schemas, redaction, and write gate are copied
@@ -176,11 +176,11 @@ into the new repo unchanged (package names kept).
 
 ## D17. MCP distribution (supersedes D9's forwarder containers)
 Agents attach one of two ways, both backed by POST /v1/tools:
-- remote: the connector serves MCP over streamable HTTP at /mcp/<domain>
+- remote: the gateway serves MCP over streamable HTTP at /mcp/<domain>
   and /mcp/all on its single port, bearer token in headers;
 - local: a published stdio package `advancedmd-mcp` (uvx advancedmd-mcp
-  --domain patients) that forwards to ADVANCEDMD_CONNECTOR_URL with
-  ADVANCEDMD_CONNECTOR_TOKEN; no credentials, no tool logic.
+  --domain patients) that forwards to ADVANCEDMD_GATEWAY_URL with
+  ADVANCEDMD_GATEWAY_TOKEN; no credentials, no tool logic.
 The repo ships a Claude Code plugin (plugin/.claude-plugin/plugin.json +
 .mcp.json) declaring the nine stdio servers; the same files serve as
 Cursor/Desktop config. Tool names, schemas, and redacted shapes are
@@ -191,10 +191,10 @@ See SPEC.md for the full contract.
 Recorded here because each one resolves a seam or a conflict that no
 single lane owned.
 
-- Startup entry point. `connector.lifecycle.wire_real_deps(config)` is
-  the only place a real singleton is named; `connector.app.build_app()`
+- Startup entry point. `gateway.lifecycle.wire_real_deps(config)` is
+  the only place a real singleton is named; `gateway.app.build_app()`
   is the production ASGI factory and the container runs
-  `uvicorn --factory connector.app:build_app`. Importing connector.app
+  `uvicorn --factory gateway.app:build_app`. Importing gateway.app
   therefore reads no environment and opens no file.
 - MCP session idle timeout is configuration, not a constant:
   MCP_SESSION_IDLE_S (SPEC 15, default 3600) joins the SPEC 19 table and
@@ -212,27 +212,27 @@ single lane owned.
   promoted record is outstanding, and a promoted record is keyed on the
   moment it was promoted rather than on its original arrived_at.
   `arrived_at` itself is never rewritten. See
-  connector/queues.py::EntryQueue._promote_aged and
+  gateway/queues.py::EntryQueue._promote_aged and
   tests/load/test_fairness.py.
 - One login at a time. AmdSession.login holds a lock and re-checks under
   it. Without it the startup login and the first tool call each take a
   slot from the 1/min login bucket and the loser waits a full minute for
   a session it was about to be handed.
 - GET /v1/tools and the MCP surface build their row with the same
-  function (connector.mcp_surface.tool_row), so the SPEC 12.4 parity test
+  function (gateway.mcp_surface.tool_row), so the SPEC 12.4 parity test
   cannot be satisfied by two copies drifting apart.
 - Metrics are fed from the audit line's own fields
   (lifecycle._AuditingMetrics): a value the SPEC 17.2 key set forbids in
   an audit line cannot reach a public /metrics label either.
 
 ## D19. Tailnet-only transport (accepted risk)
-The connector binds to the Docker compose network and the Tailscale
+The gateway binds to the Docker compose network and the Tailscale
 interface only; it has no public port (SPEC 17.4). Transport inside the
 tailnet is WireGuard-encrypted by Tailscale, and version 1 adds no TLS
 termination on top of that. This is an accepted risk, not an oversight:
 the condition attached to accepting it is that the tailnet remains the
-only route to the connector. If that ever stops being true — a public
-port is added, or the connector becomes reachable from outside the
+only route to the gateway. If that ever stops being true — a public
+port is added, or the gateway becomes reachable from outside the
 tailnet by any other means — TLS termination inside the tailnet (SPEC
 25) is no longer deferrable and must be built before that route ships.
 /health and /metrics are unauthenticated but are covered by the same
@@ -241,9 +241,9 @@ outside the tailnet.
 
 ## D20. The login-check cache (SPEC 8.7)
 /v1/login (the admin-console forwarded-credential check) shares the
-connector's 1-per-minute login bucket with the connector's own session
+gateway's 1-per-minute login bucket with the gateway's own session
 login, through a separate, throwaway AmdSession that never touches the
-connector's session. Sharing the bucket means concurrent staff logins
+gateway's session. Sharing the bucket means concurrent staff logins
 serialize behind it — the second one waits up to 60 s. The mitigation is
 an in-memory cache, keyed on sha256(username + office_key + password),
 of successful checks for LOGIN_CHECK_CACHE_S (default 300 s); a cache
@@ -291,11 +291,213 @@ resolved them.
   The vendored amd-mcp/amd_client/client.py opens its own sockets and
   drives its own login and rate limiting, so copying it into domains/
   would violate SPEC 6.2 and hand the process a second, uncoordinated
-  clock. connector/client_shim.py instead provides an AMDClient-shaped
+  clock. gateway/client_shim.py instead provides an AMDClient-shaped
   facade — the same method surface (call(action, class_, *,
   children=None, **attrs), get_patient_bundle, get_visits_for_date,
   get_appointments_via_reminders) — implemented as pure XML request
-  construction plus `await connector.sender.send()`. Copied handlers get
+  construction plus `await gateway.sender.send()`. Copied handlers get
   one of these from their existing client factory and their call sites
   do not change. amd_mcp_common.rate_limit is correspondingly not
-  copied either; connector/clock.py is the only clock in the process.
+  copied either; gateway/clock.py is the only clock in the process.
+
+## D23. Revocation is re-read on the auth path, in a thread (SPEC 10.1, 10.2)
+`gateway tokens revoke` edits a file while the gateway is serving, so
+the SPEC 10.2 promise — a revoked token fails on the next request, no
+restart — only holds if something re-reads the table on the request path.
+Both auth paths now do: `Receiver.authenticate` (POST /v1/tools, POST
+/v1/login, GET /v1/tools) and `_Surface.authenticate` (the MCP surface).
+Startup additionally installs the SIGHUP handler, which is what makes
+`kill -HUP` land a revocation inside the 30 s throttle window instead of
+after it.
+
+The re-read stats and may read the file, which is disk I/O and therefore
+may not happen on the event loop (SPEC 4.4), so it runs in
+`asyncio.to_thread`. Paying a thread hop on every authenticated request
+just to discover the 30 s window has not elapsed would be worse than the
+stat it avoids, so `TokenTable.reload_due()` was added: an I/O-free,
+side-effect-free predicate for "would the next reload touch the disk".
+The auth paths consult it first and only dispatch to a thread when a real
+read is due. It is deliberately not part of the frozen
+`interfaces.TokenTable` Protocol — a table that does not offer it is
+simply reloaded, which is correct if slower, so the seam stays unchanged
+and the test fakes keep working.
+
+## D24. The MCP tool schema is read under both spellings (registry._tool_schema)
+
+**Context.** mcp 2.x renamed the `Tool` schema field to `input_schema` and
+kept `inputSchema` as the wire alias; mcp 1.x has only `inputSchema`. The
+nine copied domain packages construct their `Tool` objects with the alias,
+which BOTH library versions accept. So the write side is already
+version-neutral and only the READ side has a choice to make.
+
+**Decision.** `gateway/registry.py::_tool_schema` reads `input_schema`
+first, then falls back to `inputSchema`. Nothing else changes: no pin on
+the `mcp` dependency, no rewrite of nine packages' Tool construction.
+
+**Alternatives.**
+
+- *Pin `mcp` to one major.* Rejected: the gateway does not otherwise care
+  which major is installed, and a pin makes an unrelated dependency bump
+  a gateway change.
+- *Rewrite the nine packages to the new spelling.* Rejected: it would
+  touch nine copied packages to fix a one-line read, and it would break
+  under mcp 1.x — the opposite direction of the same problem.
+- *Read only `inputSchema` (the alias both versions accept).* Tempting and
+  nearly right, but it reads a compatibility alias as the primary contract
+  and would silently return `{}` the day mcp drops it.
+
+**Consequences.** A `Tool` carrying NEITHER field yields
+`{"type": "object"}`, which makes args validation a no-op for that tool.
+That permissiveness is deliberate: a schemaless registered tool is a
+registry bug, caught by `tests/unit/test_registry.py`, not a
+caller-facing gate. Failing the CALL would turn a packaging mistake into
+a runtime outage for a tool that may be perfectly functional.
+
+## D25. The PHI redaction key set is a knowledge file, and a loaded file REPLACES the fallback
+
+**Context.** `domains/amd_mcp_common/redact.py` decides what a non-PHI
+caller may see. Its key set was a Python literal, which means the answer
+to "what does this system consider PHI" was only readable by reading code
+— and the answer is a compliance artifact, not an implementation detail.
+
+**Decision.** `knowledge/policies/phi-redaction-fields.data.json` is the
+key set. `redact._FALLBACK_PHI_KEYS` mirrors it and is used only when the
+file is absent. A loaded file **REPLACES** the fallback; it is not merged
+with it.
+
+Fail-closed spellings recorded here because each one looks like an
+over-reach until you see why it is not:
+
+| key | why it is PHI |
+|---|---|
+| `query` | a lookup's search echo IS a name — the caller searched for a person |
+| `id` | handlers rename to `visit_id` / `patient_id`; a surviving bare `id` is an unnormalised raw AMD echo |
+| `chart` | the bare AMD attribute spelling of chart number |
+| `memo` | free text on a patient record; unbounded, so unclassifiable |
+| `zipcode` | AMD's spelling; a geographic subdivision smaller than a state |
+| `_text` nodes | element text carries the same values the attributes do |
+| `raw_xml` | a whole AMD body, unredactable — see D26 |
+
+**Alternatives.**
+
+- *Merge file with fallback.* Rejected, and this is the load-bearing half
+  of the decision. Under a merge, no reader can tell what is actually
+  enforced without ALSO reading the code — which defeats the entire point
+  of externalizing the set. Replacement makes the file auditable as THE
+  answer.
+- *File only, no fallback.* Rejected: a missing or unparseable file would
+  then redact nothing, i.e. fail OPEN. The fallback is the fail-closed
+  floor.
+- *Keep it in Python.* Rejected: a compliance reviewer should not have to
+  read a module to learn the key set.
+
+**Consequences.** Replacement creates a standing obligation: the file
+must stay a **SUPERSET** of `_FALLBACK_PHI_KEYS`, because a subset file
+silently OPENS a hole rather than failing. That obligation is asserted by
+`tests/invariants/test_phi_redaction_holes.py`, which is the only thing
+standing between an editor's good intentions and a PHI leak. Practically,
+a non-PHI caller sees `<REDACTED>` for a code lookup's search echo and for
+a masterfile row's internal `id`; callers that genuinely need those carry
+`phi=true`.
+
+## D26. raw_xml is a SECOND permission on top of phi, never a substitute
+
+**Context.** A raw AMD response body cannot be redacted — it is an opaque
+string whose internal structure the Redactor does not walk. Field-level
+redaction has nothing to grip. So `raw_xml` cannot be governed by the
+same flag that governs field-level PHI.
+
+**Decision.** Delivery requires **BOTH** `phi` and `raw_xml` on the
+caller's token. `gateway/worker.py::strip_raw_xml` removes every key in
+`RAW_XML_KEYS`, plus the `<key>_hash` sidecar the Redactor leaves behind,
+for any caller missing either flag. It **OMITS** the key rather than
+blanking it. An unresolvable caller gets neither flag.
+
+**Alternatives.**
+
+- *raw_xml alone suffices.* Rejected: that would let a caller with no PHI
+  entitlement receive an entire PHI-bearing body, which is strictly worse
+  than the field access it was denied.
+- *Blank the value (`""` or `None`).* Rejected: a present-but-empty key
+  tells a caller the key EXISTS, which lets it distinguish "stripped from
+  me" from "never produced" and probe the gate. Omission collapses those
+  two states into one.
+- *Redact inside the string.* Rejected: it would mean parsing an AMD body
+  inside the redactor and re-serializing it — a second, weaker parser on
+  the PHI path.
+
+**Consequences.** A `--raw-xml` token WITHOUT `--phi` receives nothing.
+That is the intended trap, not a misconfiguration to be papered over. And
+the gate is live, tested, and documented BEFORE any producer exists —
+which is the right order: the permission model is settled before the first
+byte can flow through it. The producer is PHASE R4a's job; per SPEC 10.4
+`note-audit` is the only intended `--raw-xml` holder.
+
+## D27. getehrnotes is the one raw_xml producer (SPEC 17.1)
+
+`amd_ehr_getehrnotes` now always returns `result["raw_xml"]`, carrying
+AMD's note XML. It is the gateway's FIRST and ONLY raw-XML producer, and
+it exists because SPEC 13.3 promises note-audit's `fetch_note_raw` a
+string to read; until it landed that promise was unimplemented and the
+consumer plan's note-audit cutover could not start.
+
+Raw XML is the one payload the redactor cannot help with — it is a whole
+AMD response body in AMD's own spellings — so the capability is fenced by
+seven rules rather than by care:
+
+1. **No sender change.** `send()` returns a parsed element and keeps
+   returning one. No raw-bytes side channel, no "last response body"
+   ContextVar, no retained buffer: each would be a process-wide place an
+   AMD body lives outside the record that asked for it.
+2. **Re-serialize, do not re-read the wire.** The string is built with
+   `etree.tostring(..., encoding="unicode")` from the tree `send()`
+   already parsed. Legitimate because the reference consumer does exactly
+   that — note-audit's `fetch_note_raw` builds a fresh `<PPMDResults>`
+   wrapper around the matched `<patientnote>` and tostrings it — so
+   byte-fidelity to AMD's literal body is no consumer's requirement.
+3. **The full `<patientnotelist>` subtree, not a projection.** note-audit
+   date-filters and re-wraps on its side; projecting here would
+   reimplement the note parser inside the gateway. This is also why
+   `raw_xml` is right for THIS tool and wrong for `gettxhistory` and
+   `getchargedetaildata`: those have a safe row projection, so they get
+   one and are explicitly NOT approved for raw XML by this decision.
+4. **Additive only.** `{patient_id, count}` are unchanged; `raw_xml` is an
+   added key, and additive fields are not a /v2 event (SPEC 11.6). A
+   caller without the flags sees today's result byte for byte, because
+   the worker OMITS the key rather than blanking it.
+5. **The handler does not check the token.** It always produces the key;
+   `worker._apply_result_policy` strips it for anyone lacking `phi` AND
+   `raw_xml`. A policy check in the handler would duplicate the gate, and
+   two gates that can disagree are worse than one.
+6. **Nothing new logs, persists, meters or errors on the string.** The
+   audit key set is closed (SPEC 17.2), metrics label values are closed
+   (SPEC 18.1), and the log filter redacts long values and `result`/`args`
+   keys (SPEC 17.3). All three were previously only tested against a fake
+   handler; they are now tested with the real producer's output.
+7. **One holder.** note-audit is the only `--raw-xml` token (SPEC 10.4).
+   A second holder is a policy change needing its own compliance pass.
+
+Empty-note semantics (Q-5) are resolved in favour of an empty
+`<PPMDResults><Results patientnotecount="0"><patientnotelist/>` shell
+rather than a missing key: absence of `raw_xml` then means exactly one
+thing — the caller is not entitled — and note-audit can distinguish that
+from "this patient has no notes".
+
+One supporting change in `domains/`: `amd_ehr_mcp/handlers/_common.py`
+gained `safe_amd_call_element_async`, returning `(element, raw_dict,
+err)`, because the existing 2-tuple wrapper discards the element the
+handler needs. `safe_amd_call_async` now delegates to it and its
+signature and return shape are unchanged, so no other handler is
+affected. The `getehrnotes` ledger row in `docs/TOOL_TO_XML_MAP.md` was
+re-frozen in the same change (CLAUDE.md's never-modify-`domains/`-without
+-the-map rule).
+
+Rollback has two levels. Code: revert the handler change — the gate, the
+tests and the token flag all pre-date it and stay. Policy: re-issue
+note-audit's token without `--raw-xml` and SIGHUP, which leaves the
+producer in place with nobody entitled to its output. The second is
+strictly safe and needs no redeploy.
+
+Deliberately NOT decided here: `templateid`. note-audit also sends a
+practice-specific template filter that this handler omits; that is GAP-17
+and belongs to the consumer plan's C4, not to a shared tool.

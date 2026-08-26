@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "advancedmd-connector"
+name = "advancedmd-gateway"
 version = "1.0.0"
 description = "The only process that talks to AdvancedMD: one session, one rate clock, one tool surface."
 requires-python = ">=3.11"
@@ -26,10 +26,10 @@ dev = [
 ]
 
 [project.scripts]
-connector = "connector.tokens:main"
+gateway = "gateway.tokens:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["connector", "domains"]
+packages = ["gateway", "domains"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

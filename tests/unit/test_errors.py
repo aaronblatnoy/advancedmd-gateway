@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from connector import errors as E
+from gateway import errors as E
 
 # The SPEC 14 table, transcribed. If a row here disagrees with the code,
 # the code is wrong.

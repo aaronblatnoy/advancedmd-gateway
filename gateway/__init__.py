@@ -1,4 +1,4 @@
-"""advancedmd-connector: the only process that talks to AdvancedMD.
+"""advancedmd-gateway: the only process that talks to AdvancedMD.
 
 One session, one rate clock, one tool surface (SPEC 1.1). Nothing outside
 this package holds AMD credentials or sends XML.

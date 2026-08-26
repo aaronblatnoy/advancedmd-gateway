@@ -1,11 +1,11 @@
-// Buildout workflow for advancedmd-connector (SPEC.md v1.0).
-// Scope: connector repo only (SPEC 1-12, 14-21, 23, 24).
+// Buildout workflow for advancedmd-gateway (SPEC.md v1.0).
+// Scope: gateway repo only (SPEC 1-12, 14-21, 23, 24).
 // Out of scope here: SPEC 13 (backend SDK) and SPEC 22 (migration) -> later workflow.
 
 export const meta = {
-  name: 'build-connector',
+  name: 'build-gateway',
   description:
-    'Builds advancedmd-connector from SPEC.md: scaffold + frozen interfaces, five parallel builder lanes (clock/session/sender, worker/registry/verification, tokens/audit/logging/metrics, HTTP API, MCP surface + shim + plugin), serial integration, docs + adversarial audit-duo, then an annoying-compliance-officer HARD GATE on SPEC 17.',
+    'Builds advancedmd-gateway from SPEC.md: scaffold + frozen interfaces, five parallel builder lanes (clock/session/sender, worker/registry/verification, tokens/audit/logging/metrics, HTTP API, MCP surface + shim + plugin), serial integration, docs + adversarial audit-duo, then an annoying-compliance-officer HARD GATE on SPEC 17.',
   phases: [
     { title: 'P0 scaffold and frozen interfaces', detail: 'pyproject, Docker, config/errors/queues, client shim seam, copied domains/ and knowledge/, test scaffold and invariant tests.' },
     { title: 'P1 parallel builder lanes', detail: 'Five disjoint-file lanes: clock/session/sender; worker/registry/verification/fixtures; tokens/audit/logging/metrics; HTTP API; MCP surface + stdio shim + plugin.' },
@@ -15,7 +15,7 @@ export const meta = {
   ],
 };
 
-const REPO = '/Users/aaron_7nh0yzm/advancedmd-connector';
+const REPO = '/Users/aaron_7nh0yzm/advancedmd-gateway';
 const SRC = '/Users/aaron_7nh0yzm/amd-mcp';
 const REF = '/Users/aaron_7nh0yzm/orlando-derm-backend';
 
@@ -23,7 +23,7 @@ const COMMON = `
 ANCHOR: work only inside ${REPO} (a git repo, branch main). Use absolute paths.
 
 READ FIRST (in this order): ${REPO}/SPEC.md (the build contract; the sections
-named in your brief in full), ${REPO}/docs/CONNECTOR_DECISIONS.md,
+named in your brief in full), ${REPO}/docs/GATEWAY_DECISIONS.md,
 and the relevant entries of ${REPO}/docs/TOOL_TO_XML_MAP.md.
 
 SOURCES (READ-ONLY, never modify, never write into):
@@ -54,15 +54,15 @@ INVARIANTS you must not break (they are tested in tests/invariants/):
   httpx.AsyncClient. Any copied handler code doing blocking I/O is wrapped in
   asyncio.to_thread or rewritten. A slow AMD reply must not delay /health.
 - SPEC 6.2: handlers never import httpx, requests, or the AMD URL. A test greps
-  the domains/ tree and fails on any hit outside connector/sender.py and
-  connector/session.py.
+  the domains/ tree and fails on any hit outside gateway/sender.py and
+  gateway/session.py.
 - SPEC 17.2: the audit serializer accepts ONLY the key set
   {ts, request_id, caller, tool, priority, outcome, amd_calls, amd_actions,
   tier, waited_ms, elapsed_ms, peak, relogin} and rejects anything else. Never
   args, never results, never AMD bodies, never patient identifiers.
 - SPEC 17.3: one log filter redacts any value over 200 chars and any key named
   password, token, usercontext, result, args. httpx logging pinned to WARNING.
-- SPEC 23.6: the connector-side CI invariants.
+- SPEC 23.6: the gateway-side CI invariants.
 
 COMMIT RULES: stage with explicit paths only (git add <path> <path>), NEVER
 git add -A and never git add . . One commit per phase. Plain message, no
@@ -81,12 +81,12 @@ A1. Tool naming. Appendix A and SPEC 10.4 use bare AMD action names
     canonical names only, so SPEC 12.1 parity with today's amd-mcp holds.
 A2. amd_client. The vendored ${SRC}/amd_client/client.py opens sockets, so it
     MUST NOT be copied into domains/ (it would violate SPEC 6.2). Instead
-    connector/client_shim.py provides an AMDClient-shaped facade
+    gateway/client_shim.py provides an AMDClient-shaped facade
     (call(action, class_, *, children=None, **attrs), get_patient_bundle,
     get_visits_for_date, get_appointments_via_reminders) whose every method
-    builds an XmlRequest and awaits connector.sender.send(). Handlers keep
+    builds an XmlRequest and awaits gateway.sender.send(). Handlers keep
     their existing call sites unchanged. amd_mcp_common.rate_limit is NOT
-    copied; connector/clock.py is the only clock.
+    copied; gateway/clock.py is the only clock.
 A3. Verified-tool naming in Appendix A "login (internal)" is not a registry
     tool; it is session.login plus the /v1/login route.
 `;
@@ -146,9 +146,9 @@ TASK (SPEC 20 repository layout):
      masterfiles, system, ehr (amd-<domain>-mcp/src/amd_<domain>_mcp).
      ${SRC}/amd-mcp-server-common/src/amd_mcp_common  -> ${REPO}/domains/amd_mcp_common
    Do NOT copy amd-portal-mcp (SPEC N3). Do NOT copy amd_client (see A2).
-   Do NOT copy amd_mcp_common/rate_limit.py (the connector clock replaces it),
+   Do NOT copy amd_mcp_common/rate_limit.py (the gateway clock replaces it),
    and delete any import of it that you copy; leave a "# removed: rate limiting
-   is owned by connector/clock.py" comment at each removal site and list them
+   is owned by gateway/clock.py" comment at each removal site and list them
    in notes.
    Copy each package's schemas / generated schema data it needs at import time.
    Do not copy tests, uv.lock, egg-info, .venv, memory/, docs/ or README from
@@ -185,12 +185,12 @@ ${OWN([
       `${REPO}/docker-compose.yml`,
       `${REPO}/.env.example`,
       `${REPO}/.gitignore (amend only)`,
-      `${REPO}/connector/__init__.py`,
-      `${REPO}/connector/config.py`,
-      `${REPO}/connector/errors.py`,
-      `${REPO}/connector/queues.py`,
-      `${REPO}/connector/interfaces.py`,
-      `${REPO}/connector/client_shim.py`,
+      `${REPO}/gateway/__init__.py`,
+      `${REPO}/gateway/config.py`,
+      `${REPO}/gateway/errors.py`,
+      `${REPO}/gateway/queues.py`,
+      `${REPO}/gateway/interfaces.py`,
+      `${REPO}/gateway/client_shim.py`,
       `${REPO}/tests/__init__.py and conftest.py`,
       `${REPO}/tests/invariants/test_no_amd_imports_outside_sender.py`,
       `${REPO}/tests/invariants/test_no_blocking_on_loop.py (may xfail until P2)`,
@@ -199,31 +199,31 @@ ${OWN([
     ])}
 
 WHAT TO BUILD:
-1. pyproject.toml: package "advancedmd-connector", python 3.11+, deps fastapi,
+1. pyproject.toml: package "advancedmd-gateway", python 3.11+, deps fastapi,
    uvicorn, httpx, lxml, pydantic, prometheus-client (or a hand-rolled text
    exposition), mcp; dev deps pytest, pytest-asyncio, respx or a local mock.
-   A console script "connector" -> connector.tokens:main (SPEC 10.2 CLI).
+   A console script "gateway" -> gateway.tokens:main (SPEC 10.2 CLI).
 2. Dockerfile + docker-compose.yml per SPEC 21: one service, ONE replica
    (state it explicitly), port 8820, /data volume for clock.json and the token
    table, healthcheck GET /health treating ok and degraded as healthy.
 3. .env.example: every variable in the SPEC 19 table with its default and a
    PLACEHOLDER for the three required AMD secrets. No real values.
-4. connector/config.py: a frozen dataclass loaded from the environment covering
+4. gateway/config.py: a frozen dataclass loaded from the environment covering
    the full SPEC 19 table with the exact defaults, and fail-fast validation of
-   AMD_USERNAME, AMD_PASSWORD, AMD_OFFICE_KEY, CONNECTOR_TOKENS_PATH
+   AMD_USERNAME, AMD_PASSWORD, AMD_OFFICE_KEY, GATEWAY_TOKENS_PATH
    (SPEC 16.1 step 1). CLOCK_MARGIN must be <= 1.0 or startup fails.
-5. connector/errors.py: the complete SPEC 14 table as a ConnectorError
+5. gateway/errors.py: the complete SPEC 14 table as a ConnectorError
    hierarchy - one class per code carrying code, http_status, retryable, plus
    AmdFault(amd_code, message). map_to_connector_error(exc) for the worker.
    MUST: error messages never include args, results, or AMD bodies; write a
    unit test that asserts this for every class.
-6. connector/queues.py: the ToolRequest dataclass exactly as SPEC 5.2, the
+6. gateway/queues.py: the ToolRequest dataclass exactly as SPEC 5.2, the
    XmlRequest dataclass exactly as SPEC 6.1 (plus retried_after_relogin: bool),
    the entry queue (asyncio.PriorityQueue keyed (effective_priority,
    arrived_at, sequence), SPEC 5.3, including BATCH_AGING_MS promotion) and the
    request queue (keyed (priority, sequence), SPEC 6.3). Depth accessors for
    /health and /metrics.
-7. connector/interfaces.py: the FROZEN seams the other lanes import. Define as
+7. gateway/interfaces.py: the FROZEN seams the other lanes import. Define as
    Protocols / abstract signatures with docstrings and NO implementation:
      - async def send(req: XmlRequest) -> Element     (SPEC 6.2, exact signature)
      - RateClock: async acquire(tier: int | str) -> None; snapshot() -> dict
@@ -237,15 +237,15 @@ WHAT TO BUILD:
        alias resolution per A1
      - Auditor.emit(record, **fields) with the SPEC 17.2 allowlist
    Every lane imports from here; nobody redefines these.
-8. connector/client_shim.py per resolved ambiguity A2: an AMDClient-shaped
+8. gateway/client_shim.py per resolved ambiguity A2: an AMDClient-shaped
    facade over interfaces.send(). Read
    ${SRC}/amd_client/client.py and the four backend reference clients to get
    the method surface and XML shapes right, but implement it as pure request
    construction plus await send(). It imports NO httpx and knows NO AMD URL.
    The copied handlers get this object; their call sites stay unchanged.
-9. tests/invariants/: the two SPEC 23.6 connector-side tests. The import grep
+9. tests/invariants/: the two SPEC 23.6 gateway-side tests. The import grep
    test must be REAL and passing now (it walks ${REPO}/domains and
-   ${REPO}/connector, allows connector/sender.py and connector/session.py, and
+   ${REPO}/gateway, allows gateway/sender.py and gateway/session.py, and
    fails on httpx, requests, or an advancedmd.com URL anywhere else).
    test_no_blocking_on_loop may be written now and marked xfail with a reason
    until P2 wires the app; P2 removes the xfail.
@@ -261,8 +261,8 @@ WHAT TO BUILD:
     only by the operator on the box. Do not run it.
 
 VERIFY: python -m pytest ${REPO}/tests -q must pass (xfail allowed only where
-stated). Also run: python -c "import connector.config, connector.errors,
-connector.queues, connector.interfaces, connector.client_shim".
+stated). Also run: python -c "import gateway.config, gateway.errors,
+gateway.queues, gateway.interfaces, gateway.client_shim".
 
 THEN COMMIT with explicit paths: the files you own plus domains/ and knowledge/
 from the copy step. Message: "P0 scaffold, frozen interfaces, copied domains".
@@ -286,9 +286,9 @@ Return the commit sha.`,
   log('Five lanes on disjoint files, no worktrees (P2 must read every lane on the working tree).');
 
   const laneCommon = `${COMMON}
-P0 has landed. Import the frozen seams from connector/interfaces.py,
-connector/config.py, connector/errors.py, connector/queues.py and
-connector/client_shim.py. Do NOT change any of those files; if one is wrong,
+P0 has landed. Import the frozen seams from gateway/interfaces.py,
+gateway/config.py, gateway/errors.py, gateway/queues.py and
+gateway/client_shim.py. Do NOT change any of those files; if one is wrong,
 STOP and report it in blockers so P2 can fix it in one place.
 
 You are one of five parallel lanes. Touch ONLY your own files. Other lanes'
@@ -305,9 +305,9 @@ stray files.`;
 LANE A - clock, session, sender. IMPLEMENTS SPEC 6.4, 7 (all of it), 8, and the
 sender half of 15.
 ${OWN([
-          `${REPO}/connector/clock.py`,
-          `${REPO}/connector/session.py`,
-          `${REPO}/connector/sender.py`,
+          `${REPO}/gateway/clock.py`,
+          `${REPO}/gateway/session.py`,
+          `${REPO}/gateway/sender.py`,
           `${REPO}/tests/unit/test_clock.py`,
           `${REPO}/tests/unit/test_session.py`,
           `${REPO}/tests/unit/test_sender.py`,
@@ -351,9 +351,9 @@ login refused -> degraded. Use injectable time, never real sleeps.`,
 LANE B - worker loop, registry, verification, Appendix C fixes, synthetic
 fixtures. IMPLEMENTS SPEC 5.4, 9 (all), Appendix A, Appendix B, Appendix C.
 ${OWN([
-          `${REPO}/connector/worker.py`,
-          `${REPO}/connector/registry.py`,
-          `${REPO}/connector/verification.py`,
+          `${REPO}/gateway/worker.py`,
+          `${REPO}/gateway/registry.py`,
+          `${REPO}/gateway/verification.py`,
           `${REPO}/tests/unit/test_worker.py`,
           `${REPO}/tests/unit/test_registry.py`,
           `${REPO}/tests/unit/test_queues.py`,
@@ -406,10 +406,10 @@ checklist (the operator's live check) as PENDING OPERATOR - do not claim it.`,
 LANE C - tokens and CLI, audit, logging filter, metrics. IMPLEMENTS SPEC 10,
 17.2, 17.3, 18.
 ${OWN([
-          `${REPO}/connector/tokens.py`,
-          `${REPO}/connector/audit.py`,
-          `${REPO}/connector/logging_filter.py`,
-          `${REPO}/connector/metrics.py`,
+          `${REPO}/gateway/tokens.py`,
+          `${REPO}/gateway/audit.py`,
+          `${REPO}/gateway/logging_filter.py`,
+          `${REPO}/gateway/metrics.py`,
           `${REPO}/tests/unit/test_tokens.py`,
           `${REPO}/tests/unit/test_audit.py`,
           `${REPO}/tests/unit/test_logging_filter.py`,
@@ -417,11 +417,11 @@ ${OWN([
         ])}
 tokens.py: token format per SPEC 10.1 (32 random bytes base64url prefixed with
 the caller name), stored SHA-256 hashed in the JSON table at
-CONNECTOR_TOKENS_PATH; plaintext shown once at issuance and never stored or
+GATEWAY_TOKENS_PATH; plaintext shown once at issuance and never stored or
 logged. Table loaded at startup, re-read on SIGHUP and when mtime changes
 (checked every 30 s). The exact table shape in SPEC 10.1. Policy evaluation per
 10.3 with DEFAULT DENY, accepting either tool spelling per A1. The
-"connector tokens add|revoke|list" CLI per 10.2 - list never shows hashes.
+"gateway tokens add|revoke|list" CLI per 10.2 - list never shows hashes.
 Seed the SPEC 10.4 launch callers as a documented example table in
 docs (values only, no real tokens).
 audit.py: the SPEC 17.2 serializer with a HARD key allowlist - any key outside
@@ -445,16 +445,16 @@ status and retryable flag.`,
 LANE D - HTTP API and lifecycle. IMPLEMENTS SPEC 11 (all routes), 16, and the
 receiver half of SPEC 5.1 and 15.
 ${OWN([
-          `${REPO}/connector/app.py`,
-          `${REPO}/connector/receiver.py`,
-          `${REPO}/connector/lifecycle.py`,
+          `${REPO}/gateway/app.py`,
+          `${REPO}/gateway/receiver.py`,
+          `${REPO}/gateway/lifecycle.py`,
           `${REPO}/tests/integration/test_api.py`,
           `${REPO}/tests/integration/mock_amd.py`,
         ])}
 Build against the FROZEN interfaces plus the conftest fakes ONLY. Lanes A, B
-and C are being written concurrently; do not import connector.clock,
-connector.sender, connector.session, connector.worker, connector.registry,
-connector.tokens, connector.audit or connector.metrics directly - take them
+and C are being written concurrently; do not import gateway.clock,
+gateway.sender, gateway.session, gateway.worker, gateway.registry,
+gateway.tokens, gateway.audit or gateway.metrics directly - take them
 through a small dependency-injection seam in lifecycle.py (a Deps object
 constructed at startup) so P2 can swap the fakes for the real singletons by
 changing one function. State that seam clearly in notes for P2.
@@ -487,7 +487,7 @@ degraded, SIGTERM drains.`,
 LANE E - MCP surface, stdio shim, Claude Code plugin. IMPLEMENTS SPEC 12
 (12.1-12.4).
 ${OWN([
-          `${REPO}/connector/mcp_surface.py`,
+          `${REPO}/gateway/mcp_surface.py`,
           `${REPO}/advancedmd_mcp/pyproject.toml`,
           `${REPO}/advancedmd_mcp/src/advancedmd_mcp/__init__.py`,
           `${REPO}/advancedmd_mcp/src/advancedmd_mcp/__main__.py`,
@@ -503,23 +503,23 @@ the MCP session is bound to that token for its lifetime (idle timeout 3600 s
 per SPEC 15). tools/list returns the domain's tools with schemas, unverified
 ones listed with "(unverified)" appended to the description. tools/call routes
 through the SAME receiver code path as POST /v1/tools with priority and
-redaction from the token; errors map to MCP errors carrying the connector error
+redaction from the token; errors map to MCP errors carrying the gateway error
 code. Expose it as a router that P2 mounts on app.py - do NOT edit
-connector/app.py yourself (Lane D owns it); export mount_mcp(app, deps) and say
+gateway/app.py yourself (Lane D owns it); export mount_mcp(app, deps) and say
 so in notes.
 advancedmd_mcp/: the stdio shim per SPEC 12.3 - "advancedmd-mcp --domain <name>"
 or "--domain all"; on start it calls GET /v1/tools, caches the list for the
 session, advertises it, and turns each tools/call into POST /v1/tools. It holds
 NO credentials, NO tool logic, NO AMD knowledge. Reads
-ADVANCEDMD_CONNECTOR_URL and ADVANCEDMD_CONNECTOR_TOKEN; missing either exits
+ADVANCEDMD_GATEWAY_URL and ADVANCEDMD_GATEWAY_TOKEN; missing either exits
 with a clear message.
 plugin/: .claude-plugin/plugin.json (name advancedmd, version, description) and
-.mcp.json declaring nine stdio servers per 12.3 using ${'${ADVANCEDMD_CONNECTOR_URL}'}
-and ${'${ADVANCEDMD_CONNECTOR_TOKEN}'} environment references. No token values.
+.mcp.json declaring nine stdio servers per 12.3 using ${'${ADVANCEDMD_GATEWAY_URL}'}
+and ${'${ADVANCEDMD_GATEWAY_TOKEN}'} environment references. No token values.
 TESTS: tools/list per domain; tools/call routed through the worker (with fakes);
 error mapping; and the SPEC 12.4 parity test - start the shim against a MOCK
-connector and assert tools/list is identical to the remote surface's list.
-Everything runs against mocks; never start a real connector against AMD.`,
+gateway and assert tools/list is identical to the remote surface's list.
+Everything runs against mocks; never start a real gateway against AMD.`,
         { label: 'P1e.mcp-shim-plugin', phase: 'P1 parallel builder lanes', model: 'opus', schema: buildSchema }
       ),
   ]);
@@ -547,7 +547,7 @@ is seams and defects, not redesign. Specifically:
    constructed once at startup and shared by reference per SPEC 4.6, and start
    the worker loop and sender loop as the two long-lived tasks (SPEC 4.3).
 2. Mount Lane E's MCP router on app.py via its mount_mcp seam.
-3. Give the copied handlers the connector/client_shim.py AMDClient facade so
+3. Give the copied handlers the gateway/client_shim.py AMDClient facade so
    every handler reaches AMD only through send() (SPEC 6.2, ambiguity A2).
 4. Wrap or rewrite any copied handler blocking I/O per SPEC 4.4, and REMOVE the
    xfail from tests/invariants/test_no_blocking_on_loop.py - it must now be a
@@ -561,7 +561,7 @@ is seams and defects, not redesign. Specifically:
    clock exceed the cap in the spanning minute. Use injected time; the test
    must run in seconds and must never hit a real network.
 6. Fix any cross-lane defect you find. If a lane's frozen-interface complaint
-   in its blockers is correct, fix connector/interfaces.py here and update every
+   in its blockers is correct, fix gateway/interfaces.py here and update every
    consumer - this is the one phase allowed to change it.
 
 VERIFY, and paste the real output in testSummary:
@@ -600,13 +600,13 @@ Return the commit sha and the real pytest summary line.`,
     () =>
       agent(
         `${COMMON}
-Documentation lane. IMPLEMENTS SPEC 24 (connector-side deliverables only).
+Documentation lane. IMPLEMENTS SPEC 24 (gateway-side deliverables only).
 ${OWN([
           `${REPO}/README.md`,
           `${REPO}/CLAUDE.md`,
           `${REPO}/docs/API.md`,
           `${REPO}/docs/OPERATIONS.md`,
-          `${REPO}/docs/CONNECTOR_DECISIONS.md (APPEND D18-D21 only; do not edit D1-D17)`,
+          `${REPO}/docs/GATEWAY_DECISIONS.md (APPEND D18-D21 only; do not edit D1-D17)`,
         ])}
 README.md per SPEC 24: what it is in two paragraphs, the SPEC 3 architecture
 diagram, run locally in five commands, attach an agent three ways (remote MCP,
@@ -620,12 +620,12 @@ docs/API.md: SPEC section 11 mirrored faithfully, including every error code.
 docs/OPERATIONS.md: the tokens CLI, deploy, rollback, the SPEC 18.2 alerts,
 the batch schedule, and the SPEC 23.3 fixture procedure with its rule that an
 agent needing a new fixture STOPS and asks the operator.
-Append to docs/CONNECTOR_DECISIONS.md: D18 tailnet-only transport as an
+Append to docs/GATEWAY_DECISIONS.md: D18 tailnet-only transport as an
 accepted risk with the condition that the tailnet remains the only route
 (SPEC 17.4); D19 the login-check cache (SPEC 8.7); D20 clock persistence
 (SPEC 7.5); and D21 recording the two ambiguity resolutions A1 (canonical
 policy tool_name plus Appendix A bare-action aliases) and A2 (amd_client is not
-vendored into domains/; connector/client_shim.py is the AMDClient-shaped facade
+vendored into domains/; gateway/client_shim.py is the AMDClient-shaped facade
 over send()).
 Write only what the code actually does - read it first. No aspirational claims,
 no emojis. Do NOT commit; the final phase commits.`,
@@ -634,8 +634,8 @@ no emojis. Do NOT commit; the final phase commits.`,
     () =>
       workflow('audit-duo', {
         claim:
-          'The advancedmd-connector repository implements SPEC.md sections 4-11 and 14-18 faithfully, and its tests are real tests rather than stubs, skips, or assertions weakened to manufacture a green suite.',
-        context: `Repository: ${REPO} (read SPEC.md as the contract, then the code under connector/, domains/, advancedmd_mcp/, plugin/, and tests/). Judge specifically: (a) does the entry queue, worker loop, request queue and sender loop match SPEC 5 and 6 including the exact serial-concurrency constants; (b) is the rate clock SPEC 7 correct including CLOCK_MARGIN, peak transitions, persistence and the conservative start; (c) is session recovery exactly one re-login and one resend (SPEC 8); (d) is every SPEC 14 error code reachable with the right status and retryable flag; (e) does the audit serializer enforce the SPEC 17.2 allowlist and the log filter the 17.3 redactions; (f) are the tests real - look for skips, xfails, tautological assertions, tests that assert on a mock they themselves configured, and any fixture that is not clearly synthetic. Read-only review: do not modify the repository. Do not contact AdvancedMD.`,
+          'The advancedmd-gateway repository implements SPEC.md sections 4-11 and 14-18 faithfully, and its tests are real tests rather than stubs, skips, or assertions weakened to manufacture a green suite.',
+        context: `Repository: ${REPO} (read SPEC.md as the contract, then the code under gateway/, domains/, advancedmd_mcp/, plugin/, and tests/). Judge specifically: (a) does the entry queue, worker loop, request queue and sender loop match SPEC 5 and 6 including the exact serial-concurrency constants; (b) is the rate clock SPEC 7 correct including CLOCK_MARGIN, peak transitions, persistence and the conservative start; (c) is session recovery exactly one re-login and one resend (SPEC 8); (d) is every SPEC 14 error code reachable with the right status and retryable flag; (e) does the audit serializer enforce the SPEC 17.2 allowlist and the log filter the 17.3 redactions; (f) are the tests real - look for skips, xfails, tautological assertions, tests that assert on a mock they themselves configured, and any fixture that is not clearly synthetic. Read-only review: do not modify the repository. Do not contact AdvancedMD.`,
       }),
   ]);
   record(p3[0]);
@@ -648,7 +648,7 @@ no emojis. Do NOT commit; the final phase commits.`,
   phase('P4 compliance gate and final commit');
 
   const complianceBrief = `${COMMON}
-You are the compliance gate for advancedmd-connector, which handles PHI.
+You are the compliance gate for advancedmd-gateway, which handles PHI.
 REVIEW ONLY - do not modify any file.
 
 Audit SPEC 17.1 through 17.5 as IMPLEMENTED in ${REPO}, plus the audit and log
@@ -753,7 +753,7 @@ Final phase. Do NOT write new features. Do these three things:
    committed (no .env, no .db, no *.docx, no fixtures with real-looking data,
    no token file). Confirm with: git log --all -- '.env*' and a grep of the
    tree for the strings AMD_PASSWORD= and partnerlogin.advancedmd.com outside
-   connector/sender.py, connector/session.py, .env.example and the docs.
+   gateway/sender.py, gateway/session.py, .env.example and the docs.
 3. Commit the docs and any compliance fixes with EXPLICIT paths only. Message:
    "P3 docs, compliance fixes, final build". NEVER push.
 Then report: the commit sha, the pytest summary, and any residual open item a

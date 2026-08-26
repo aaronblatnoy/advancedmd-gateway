@@ -1,8 +1,8 @@
 # Caller tokens and policy (SPEC 10)
 
-Operator reference for `CONNECTOR_TOKENS_PATH`. Nothing in this file is a
+Operator reference for `GATEWAY_TOKENS_PATH`. Nothing in this file is a
 real token: every value shown is a placeholder. Real plaintext tokens are
-printed once by `connector tokens add` and exist only in the consuming
+printed once by `gateway tokens add` and exist only in the consuming
 app's Coolify environment.
 
 ## The table
@@ -28,7 +28,7 @@ to 100 for interactive and 500 for batch.
 ## Lifecycle
 
 - Loaded at startup. A missing or malformed file is a startup failure:
-  the connector does not come up with an empty deny-everything table.
+  the gateway does not come up with an empty deny-everything table.
 - Re-read on SIGHUP, and when the file's mtime changed (checked at most
   every 30 s). A malformed file on re-read is ignored and the last good
   table stays in force.
@@ -38,10 +38,10 @@ to 100 for interactive and 500 for batch.
 ## Issuance
 
 ```
-connector tokens add <name> --priority batch|interactive [--phi] [--raw-xml] \
+gateway tokens add <name> --priority batch|interactive [--phi] [--raw-xml] \
     [--may-write uploadfile] [--tools a,b,c] [--per-minute N]
-connector tokens revoke <name>
-connector tokens list
+gateway tokens revoke <name>
+gateway tokens list
 ```
 
 `add` prints the plaintext once; it is never stored and never logged.
@@ -50,20 +50,20 @@ connector tokens list
 ## Launch callers (SPEC 10.4)
 
 The commands that reproduce the launch table. Run them inside the
-connector image with `CONNECTOR_TOKENS_PATH` set.
+gateway image with `GATEWAY_TOKENS_PATH` set.
 
 ```
-connector tokens add admin-console          --priority interactive --tools ""
-connector tokens add chatbot                --priority interactive
-connector tokens add agent-cursor           --priority interactive
-connector tokens add agent-claude-code      --priority interactive
-connector tokens add appointment-validator  --priority batch --phi \
+gateway tokens add admin-console          --priority interactive --tools ""
+gateway tokens add chatbot                --priority interactive
+gateway tokens add agent-cursor           --priority interactive
+gateway tokens add agent-claude-code      --priority interactive
+gateway tokens add appointment-validator  --priority batch --phi \
     --tools getreminderappts,getdemographic,getdatevisits
-connector tokens add srt-auths              --priority batch --phi \
+gateway tokens add srt-auths              --priority batch --phi \
     --tools getreminderappts,getdemographic,getupdatedvisits
-connector tokens add note-audit             --priority batch --phi --raw-xml \
+gateway tokens add note-audit             --priority batch --phi --raw-xml \
     --tools getreminderappts,getehrnotes,gettxhistory,getchargedetaildata,getdemographic
-connector tokens add patient-intake         --priority batch --phi \
+gateway tokens add patient-intake         --priority batch --phi \
     --may-write uploadfile \
     --tools lookuppatient,getdemographic,uploadfile
 ```

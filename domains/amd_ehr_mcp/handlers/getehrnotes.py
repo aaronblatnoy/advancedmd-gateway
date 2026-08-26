@@ -1,4 +1,18 @@
-"""amd_ehr_get_ehr_notes - AMD getehrnotes action. Count only, no raw.
+"""amd_ehr_get_ehr_notes - AMD getehrnotes action. Count, plus raw_xml.
+
+This is the gateway's ONLY raw_xml producer (docs/GATEWAY_DECISIONS.md
+D27). The handler ALWAYS sets result["raw_xml"], a re-serialization of
+AMD's own <patientnotelist> subtree wrapped the way note-audit's
+fetch_note_raw wraps it. It does NOT look at the caller's token: whether
+that key survives to the caller is decided once, in
+gateway.worker._apply_result_policy, which strips it for anyone lacking
+BOTH phi and raw_xml (SPEC 17.1). Two gates that can disagree are worse
+than one, so there is no policy check here.
+
+When AMD returns no notes the value is an empty
+<PPMDResults><Results patientnotecount="0"><patientnotelist/> shell
+rather than a missing key, so a caller can tell "no notes" from "not
+entitled to raw XML" (the key's absence means only the latter).
 
 SPEC Appendix C defect 1, fixed here only (Amendment D-3): this handler
 used to call safe_amd_call with no class_ and with the Python-style
@@ -20,7 +34,12 @@ from __future__ import annotations
 from datetime import date as _date
 from typing import Any
 
-from ._common import count_rows_for_tags, get_client, raw_to_dict, safe_amd_call_async
+from ._common import (
+    count_rows_for_tags,
+    get_client,
+    raw_to_dict,
+    safe_amd_call_element_async,
+)
 
 ACTION = "getehrnotes"
 WRITE_ACTION = False
@@ -59,6 +78,36 @@ def _template_children() -> list:
     ]
 
 
+def _note_xml(element: Any, count: int) -> str:
+    """Re-serialize AMD's note list into note-audit's envelope shape.
+
+    Built from the tree ``send()`` already parsed, never from a second
+    read of the wire (D-R4-2): the reference consumer does the same, and
+    byte-fidelity to AMD's literal body is nobody's requirement.
+
+    The <patientnotelist> subtree is copied WHOLE (D-R4-3) -- every
+    patientnote, page and field, in AMD's own spellings. Projecting it
+    here would reimplement note-audit's note parser inside the gateway.
+    A reply with no note list yields the empty shell rather than "".
+    """
+    from copy import deepcopy
+
+    from lxml import etree
+
+    root = etree.Element("PPMDResults")
+    results = etree.SubElement(
+        root, "Results", success="1", patientnotecount=str(count)
+    )
+    notelist = None if element is None else element.find(".//patientnotelist")
+    if notelist is None:
+        etree.SubElement(results, "patientnotelist")
+    else:
+        copied = deepcopy(notelist)
+        copied.tail = None
+        results.append(copied)
+    return etree.tostring(root, encoding="unicode")
+
+
 async def handle(*, patient_id: str, since: Any = None) -> dict[str, Any]:
     if not patient_id:
         return {"error": "bad_input", "details": {"reason": "patient_id required"}}
@@ -71,7 +120,7 @@ async def handle(*, patient_id: str, since: Any = None) -> dict[str, Any]:
             "details": {"reason": f"since must be a date or date-time: {exc}"},
         }
     client = get_client()
-    raw_dict, err = await safe_amd_call_async(
+    element, raw_dict, err = await safe_amd_call_element_async(
         client,
         action=ACTION,
         raw_to_dict_fn=raw_to_dict,
@@ -85,7 +134,9 @@ async def handle(*, patient_id: str, since: Any = None) -> dict[str, Any]:
     )
     if err is not None:
         return {"patient_id": patient_id, **err}
+    count = count_rows_for_tags(raw_dict, "patientnote", "note", "ehrnote")
     return {
         "patient_id": patient_id,
-        "count": count_rows_for_tags(raw_dict, "patientnote", "note", "ehrnote"),
+        "count": count,
+        "raw_xml": _note_xml(element, count),
     }

@@ -7,7 +7,7 @@
     "the NAMES are, because SPEC Appendix C defect 1 was exactly a handler",
     "sending Python-style names. tests/integration/test_tools_verified.py",
     "asserts each handler's XmlRequest against this file.",
-    "usercontext, msgtime and nocookie are added by connector/sender.py at",
+    "usercontext, msgtime and nocookie are added by gateway/sender.py at",
     "send time and are deliberately absent here."
   ],
   "amd_patients_get_demographic": {

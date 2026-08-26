@@ -14,8 +14,8 @@ Three things this module adds on top of build_specs():
    its bare AMD action name. get() resolves either spelling to the same
    entry; canonical_names() lists only the canonical ones so MCP
    tools/list keeps SPEC 12.1 parity with today's amd-mcp.
-2. Verification state (SPEC 9.2), from connector/verification.py.
-3. Tier (SPEC 7.4). The tier table lives in connector/clock.py and is the
+2. Verification state (SPEC 9.2), from gateway/verification.py.
+3. Tier (SPEC 7.4). The tier table lives in gateway/clock.py and is the
    only authority; a `tier_for` callable is injected so this module never
    becomes a second copy of it. The local fallback exists so the registry
    can be built before the clock is wired, and it is deliberately the
@@ -23,7 +23,7 @@ Three things this module adds on top of build_specs():
    rather than a second full table.
 
 Fail-fast (SPEC 16.1 step 4): if any Appendix A tool is missing from the
-built registry, build_registry raises. A connector that cannot serve its
+built registry, build_registry raises. A gateway that cannot serve its
 launch set must not start pretending it can.
 """
 from __future__ import annotations
@@ -32,8 +32,8 @@ import importlib
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
-from connector.interfaces import Caller, RegistryEntry
-from connector.verification import APPENDIX_A, VerificationTable
+from gateway.interfaces import Caller, RegistryEntry
+from gateway.verification import APPENDIX_A, VerificationTable
 
 __all__ = [
     "DOMAIN_PACKAGES",
@@ -60,7 +60,7 @@ DOMAIN_PACKAGES: tuple[tuple[str, str], ...] = (
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: SPEC 7.4 seed: AMD's own named examples. Everything else follows the
-#: rule below. Kept short on purpose -- connector/clock.py owns the table.
+#: rule below. Kept short on purpose -- gateway/clock.py owns the table.
 _TIER_SEED: Mapping[str, int] = {
     "getupdatedvisits": 1,
     "getupdatedpatients": 1,
@@ -86,7 +86,7 @@ class RegistryBuildError(RuntimeError):
 
 
 def default_tier_for(action: str) -> int:
-    """SPEC 7.4 fallback while connector/clock.py is not injected.
+    """SPEC 7.4 fallback while gateway/clock.py is not injected.
 
     AMD's named examples, then "actions whose name begins with getupdated
     default to tier 1", then "all other calls are Low Impact" -> tier 3.
@@ -188,6 +188,20 @@ def _load_domain_specs(
     return factory.build_specs(policies=policies, schemas=schemas)
 
 
+def _tool_schema(tool: Any) -> Mapping[str, Any]:
+    """The MCP Tool's argument schema, under either spelling.
+
+    mcp 2.x renamed the field to `input_schema` (`inputSchema` remains the
+    wire alias); mcp 1.x only had `inputSchema`. The copied domain
+    packages construct Tools with the alias, which both versions accept,
+    so only the read needs to tolerate both.
+    """
+    schema = getattr(tool, "input_schema", None)
+    if schema is None:
+        schema = getattr(tool, "inputSchema", None)
+    return schema or {"type": "object"}
+
+
 def _entry_from_spec(
     spec: Any,
     *,
@@ -200,7 +214,7 @@ def _entry_from_spec(
     # only when all five checklist items are recorded, the operator live
     # check included. `served` is what the worker gates on and may be
     # True for a live-check-only gap under
-    # CONNECTOR_SERVE_PENDING_VERIFICATION (SPEC 19).
+    # GATEWAY_SERVE_PENDING_VERIFICATION (SPEC 19).
     verified = verification.is_verified(name)
     served = verification.is_served(name)
     # The wire action, not the catalog key: lookup-patient's policy key
@@ -211,7 +225,7 @@ def _entry_from_spec(
         name=name,
         domain=spec.domain,
         handler=spec.handler,
-        schema=dict(spec.tool.inputSchema or {"type": "object"}),
+        schema=dict(_tool_schema(spec.tool)),
         write_action=bool(spec.write_action),
         tier=tier_for(action),
         verified=verified,
@@ -233,7 +247,7 @@ def build_registry(
 ) -> ToolRegistry:
     """Build the registry at startup. SPEC 9.1, SPEC 16.1 step 4.
 
-    `tier_for` should be connector/clock.py's tier table (SPEC 7.4, the
+    `tier_for` should be gateway/clock.py's tier table (SPEC 7.4, the
     only authority). The fallback is the SPEC 7.4 rule itself.
 
     Write tools are registered here regardless of WRITE_TOOLS_ENABLED so

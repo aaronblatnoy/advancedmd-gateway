@@ -4,11 +4,11 @@
   advancedmd-mcp --domain all
 
 Environment:
-  ADVANCEDMD_CONNECTOR_URL    e.g. http://100.94.62.115:8820
-  ADVANCEDMD_CONNECTOR_TOKEN  the per-agent token
+  ADVANCEDMD_GATEWAY_URL    e.g. http://100.94.62.115:8820
+  ADVANCEDMD_GATEWAY_TOKEN  the per-agent token
 
 Missing either: exit 2 with a clear message on stderr. The token is read
-once, sent only as a bearer header to the configured connector, and never
+once, sent only as a bearer header to the configured gateway, and never
 logged. This process never contacts AdvancedMD.
 """
 from __future__ import annotations
@@ -46,11 +46,11 @@ ALL_DOMAIN = "all"
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
-SERVER_NAME = "advancedmd-connector"
+SERVER_NAME = "advancedmd-gateway"
 SERVER_VERSION = "1.0.0"
 
-URL_ENV = "ADVANCEDMD_CONNECTOR_URL"
-TOKEN_ENV = "ADVANCEDMD_CONNECTOR_TOKEN"
+URL_ENV = "ADVANCEDMD_GATEWAY_URL"
+TOKEN_ENV = "ADVANCEDMD_GATEWAY_TOKEN"
 
 JSONRPC_PARSE_ERROR = -32700
 JSONRPC_INVALID_REQUEST = -32600
@@ -58,7 +58,7 @@ JSONRPC_METHOD_NOT_FOUND = -32601
 JSONRPC_INVALID_PARAMS = -32602
 JSONRPC_SERVER_ERROR = -32000
 
-#: Mirrors connector/mcp_surface.py. Kept as data, not logic, because the
+#: Mirrors gateway/mcp_surface.py. Kept as data, not logic, because the
 #: shim is forbidden AdvancedMD knowledge -- this is protocol knowledge.
 _JSONRPC_BY_CONNECTOR_CODE: dict[str, int] = {
     "tool_unknown": JSONRPC_METHOD_NOT_FOUND,
@@ -74,7 +74,7 @@ class ConfigMissing(RuntimeError):
 def mcp_tool_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
     """Turn one GET /v1/tools row into an MCP tools/list entry.
 
-    Identical rule to connector.mcp_surface.mcp_tool_from_row, which is
+    Identical rule to gateway.mcp_surface.mcp_tool_from_row, which is
     what the SPEC 12.4 parity test asserts. Unverified tools are listed
     with "(unverified)" appended to the description.
     """
@@ -101,9 +101,9 @@ def _error(request_id: Any, code: int, message: str,
     return {"jsonrpc": "2.0", "id": request_id, "error": body}
 
 
-def _error_from_connector(request_id: Any, err: Mapping[str, Any]) -> dict[str, Any]:
+def _error_from_gateway(request_id: Any, err: Mapping[str, Any]) -> dict[str, Any]:
     code = str(err.get("code") or "internal")
-    message = str(err.get("message") or "connector error")
+    message = str(err.get("message") or "gateway error")
     return _error(
         request_id,
         _JSONRPC_BY_CONNECTOR_CODE.get(code, JSONRPC_SERVER_ERROR),
@@ -113,10 +113,10 @@ def _error_from_connector(request_id: Any, err: Mapping[str, Any]) -> dict[str, 
 
 
 class Shim:
-    """One stdio MCP server backed by one connector.
+    """One stdio MCP server backed by one gateway.
 
     Holds no credentials beyond the token it was configured with, no tool
-    logic, and no AdvancedMD knowledge: `tools` is whatever the connector
+    logic, and no AdvancedMD knowledge: `tools` is whatever the gateway
     said, cached for the life of the session (SPEC 12.3).
     """
 
@@ -207,19 +207,19 @@ class Shim:
             response = await self.call_tool(name, arguments)
         except Exception:  # noqa: BLE001 - never leak a transport exception
             return _error(request_id, JSONRPC_SERVER_ERROR,
-                          "amd_unavailable: connector unreachable",
+                          "amd_unavailable: gateway unreachable",
                           {"code": "amd_unavailable", "retryable": True})
 
         try:
             body = response.json()
         except ValueError:
             return _error(request_id, JSONRPC_SERVER_ERROR,
-                          "internal: connector returned a non-JSON body",
+                          "internal: gateway returned a non-JSON body",
                           {"code": "internal", "retryable": True})
 
         if not isinstance(body, Mapping) or not body.get("ok"):
             err = (body or {}).get("error") if isinstance(body, Mapping) else None
-            return _error_from_connector(request_id, err or {"code": "internal"})
+            return _error_from_gateway(request_id, err or {"code": "internal"})
 
         result = body.get("result")
         payload = result if isinstance(result, Mapping) else {"result": result}
@@ -258,7 +258,7 @@ class Shim:
                 tools = await self.load_tools()
             except Exception:  # noqa: BLE001
                 return _error(request_id, JSONRPC_SERVER_ERROR,
-                              "amd_unavailable: connector unreachable",
+                              "amd_unavailable: gateway unreachable",
                               {"code": "amd_unavailable", "retryable": True})
             return _result(request_id, {"tools": list(tools)})
         if method == "tools/call":
@@ -271,7 +271,7 @@ class Shim:
     async def run_stdio(self, stdin: Any = None, stdout: Any = None) -> None:
         """Newline-delimited JSON-RPC on stdin/stdout.
 
-        stdin is read on a worker thread so a slow connector reply never
+        stdin is read on a worker thread so a slow gateway reply never
         parks the loop that is waiting on it.
         """
         stdin = stdin or sys.stdin
@@ -310,8 +310,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="advancedmd-mcp",
         description=(
-            "Local stdio MCP shim for advancedmd-connector. Serves one "
-            "domain's tools, or all of them, by proxying to the connector."
+            "Local stdio MCP shim for advancedmd-gateway. Serves one "
+            "domain's tools, or all of them, by proxying to the gateway."
         ),
     )
     parser.add_argument(
@@ -334,9 +334,9 @@ def resolve_environment(env: Mapping[str, str] | None = None) -> tuple[str, str]
             "advancedmd-mcp cannot start: "
             + " and ".join(missing)
             + " is not set. Set "
-            + f"{URL_ENV} to the connector base URL (for example "
-            + f"http://connector-host:8820) and {TOKEN_ENV} to this agent's "
-            + "connector token."
+            + f"{URL_ENV} to the gateway base URL (for example "
+            + f"http://gateway-host:8820) and {TOKEN_ENV} to this agent's "
+            + "gateway token."
         )
     return url, token
 

@@ -1,7 +1,7 @@
 """SPEC 6.2 / 23.6: handlers never reach AdvancedMD directly.
 
-No module under domains/ or connector/ may import an HTTP client or name
-an AdvancedMD URL, except connector/sender.py and connector/session.py.
+No module under domains/ or gateway/ may import an HTTP client or name
+an AdvancedMD URL, except gateway/sender.py and gateway/session.py.
 
 This is a real test over the real tree, not a placeholder: it parses every
 Python file with ast, so it sees actual imports and actual string
@@ -16,12 +16,12 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCANNED_DIRS = ("domains", "connector")
+SCANNED_DIRS = ("domains", "gateway")
 
 #: The only two modules permitted to speak HTTP to AdvancedMD (SPEC 23.6).
 ALLOWED = {
-    REPO_ROOT / "connector" / "sender.py",
-    REPO_ROOT / "connector" / "session.py",
+    REPO_ROOT / "gateway" / "sender.py",
+    REPO_ROOT / "gateway" / "session.py",
 }
 
 FORBIDDEN_IMPORTS = {"httpx", "requests", "urllib3", "aiohttp", "http.client"}
@@ -70,7 +70,7 @@ ALL_FILES = python_files()
 
 def test_the_scan_actually_covers_the_tree():
     """Guard against a silently empty walk (a passing test that tests nothing)."""
-    assert len(ALL_FILES) > 50, "domains/ and connector/ should be populated"
+    assert len(ALL_FILES) > 50, "domains/ and gateway/ should be populated"
     assert any(p.parts[-3:-1] == ("amd_patients_mcp", "handlers") for p in ALL_FILES)
 
 
@@ -84,14 +84,14 @@ def test_no_http_client_import_and_no_amd_url(path: Path):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 assert _root_module(alias.name) not in FORBIDDEN_IMPORTS, (
-                    f"{rel} imports {alias.name}; only connector/sender.py and "
-                    "connector/session.py may reach AdvancedMD (SPEC 6.2)"
+                    f"{rel} imports {alias.name}; only gateway/sender.py and "
+                    "gateway/session.py may reach AdvancedMD (SPEC 6.2)"
                 )
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             assert _root_module(module) not in FORBIDDEN_IMPORTS, (
-                f"{rel} imports from {module}; only connector/sender.py and "
-                "connector/session.py may reach AdvancedMD (SPEC 6.2)"
+                f"{rel} imports from {module}; only gateway/sender.py and "
+                "gateway/session.py may reach AdvancedMD (SPEC 6.2)"
             )
 
     docstrings = _docstring_nodes(tree)
@@ -103,5 +103,5 @@ def test_no_http_client_import_and_no_amd_url(path: Path):
             for marker in FORBIDDEN_URL_MARKERS:
                 assert marker not in lowered, (
                     f"{rel} contains an AdvancedMD URL; it belongs in "
-                    "connector/session.py (SPEC 6.2, 23.6)"
+                    "gateway/session.py (SPEC 6.2, 23.6)"
                 )

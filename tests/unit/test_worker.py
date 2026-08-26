@@ -11,17 +11,17 @@ from typing import Any
 
 import pytest
 
-from connector.errors import (
+from gateway.errors import (
     QueueWaitExceeded,
     ToolArgsInvalid,
     ToolForbidden,
     ToolUnknown,
     ToolUnverified,
 )
-from connector.interfaces import AUDIT_KEYS, Caller, RegistryEntry
-from connector.queues import PRIORITY_BATCH, PRIORITY_INTERACTIVE
-from connector.registry import ToolRegistry
-from connector.worker import CONCURRENCY, Worker, current_client
+from gateway.interfaces import AUDIT_KEYS, Caller, RegistryEntry
+from gateway.queues import PRIORITY_BATCH, PRIORITY_INTERACTIVE
+from gateway.registry import ToolRegistry
+from gateway.worker import CONCURRENCY, Worker, current_client
 
 SCHEMA = {
     "type": "object",
@@ -143,7 +143,7 @@ async def slot_error(record):
 
 def test_concurrency_is_a_code_constant():
     """SPEC 4.5: one tool at a time, and no env var can raise it."""
-    import connector.config as config
+    import gateway.config as config
 
     assert CONCURRENCY == 1
     assert not [k for k in config.DEFAULTS if "CONCURREN" in k.upper()]
@@ -240,7 +240,7 @@ async def test_a_pending_live_check_tool_is_refused_in_production_mode(
 ):
     """SPEC 9.2/9.3: a ledger row whose live check is pending is not served.
 
-    CONNECTOR_SERVE_PENDING_VERIFICATION is false in production, so the
+    GATEWAY_SERVE_PENDING_VERIFICATION is false in production, so the
     registry marks the entry served=False and the handler never runs.
     """
     ran: list[str] = []
@@ -266,7 +266,7 @@ async def test_a_pending_live_check_tool_is_refused_in_production_mode(
 async def test_a_pending_live_check_tool_runs_when_serving_pending(
     make_record, token_table, fake_clock, entry_queue
 ):
-    """SPEC 19 CONNECTOR_SERVE_PENDING_VERIFICATION=true serves it anyway."""
+    """SPEC 19 GATEWAY_SERVE_PENDING_VERIFICATION=true serves it anyway."""
     entry = make_entry("amd_patients_get_demographic", verified=False,
                        served=True)
     worker, auditor, clients = build_worker(

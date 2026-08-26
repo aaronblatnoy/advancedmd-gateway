@@ -1,11 +1,11 @@
 """The AMD session and login, SPEC 8.
 
-With connector/sender.py, this is the only module allowed to import an
+With gateway/sender.py, this is the only module allowed to import an
 HTTP client or to name an AdvancedMD URL (SPEC 6.2, 23.6).
 
-There is exactly one AmdSession for the connector itself (SPEC 8.1). The
+There is exactly one AmdSession for the gateway itself (SPEC 8.1). The
 /v1/login credential check builds a separate, throwaway AmdSession that
-shares the same login bucket and never touches the connector's own
+shares the same login bucket and never touches the gateway's own
 session (SPEC 8.7).
 
 Credentials are never logged, never returned, and never written to disk.
@@ -25,15 +25,15 @@ from urllib.parse import urlsplit
 import httpx
 from lxml import etree
 
-from connector.clock import LOGIN_TIER
-from connector.config import Config
-from connector.errors import (
+from gateway.clock import LOGIN_TIER
+from gateway.config import Config
+from gateway.errors import (
     AmdUnavailable,
     ConnectorError,
     LoginBucketWait,
     SessionFailed,
 )
-from connector.sender import (
+from gateway.sender import (
     AMD_XML_ENCODING,
     REDIRECT_FAULT_CODE,
     fault_of,
@@ -51,7 +51,7 @@ __all__ = [
     "login_cache_key",
 ]
 
-log = logging.getLogger("connector.session")
+log = logging.getLogger("gateway.session")
 
 #: SPEC 19: the partner-login URL. config.amd_base_url is an operator
 #: override only and is empty by default, so the real default lives here,
@@ -98,7 +98,7 @@ class _OneLoginSlot:
         caller: str | None = None,
         caller_limit: int | None = None,
     ) -> None:
-        # A login is the connector's own call, never a caller's, so the
+        # A login is the gateway's own call, never a caller's, so the
         # SPEC 7.6 per-caller bucket is deliberately not charged here.
         if self._used:
             return
@@ -109,8 +109,8 @@ class _OneLoginSlot:
 class AmdSession:
     """One AMD session: endpoint plus usercontext token, in memory only.
 
-    Implements the connector.interfaces.Session protocol. Nothing outside
-    this class and connector/sender.py ever sees either value.
+    Implements the gateway.interfaces.Session protocol. Nothing outside
+    this class and gateway/sender.py ever sees either value.
     """
 
     def __init__(
@@ -131,7 +131,7 @@ class AmdSession:
         self.config = config
         self.clock = clock
         # Credential overrides exist for the SPEC 8.7 throwaway session,
-        # which checks a staff member's credentials, not the connector's.
+        # which checks a staff member's credentials, not the gateway's.
         self._username = username if username is not None else config.amd_username
         self._password = password if password is not None else config.amd_password
         self._office_key = (
@@ -357,7 +357,7 @@ def login_cache_key(username: str, office_key: str, password: str) -> str:
 class LoginChecker:
     """The /v1/login credential check. SPEC 8.7, D8.
 
-    Uses a fresh throwaway AmdSession per check, so the connector's own
+    Uses a fresh throwaway AmdSession per check, so the gateway's own
     session is never touched. Because the login bucket is 1/min,
     concurrent staff logins serialize; a successful check is cached in
     memory for LOGIN_CHECK_CACHE_S and the cached path consumes no login

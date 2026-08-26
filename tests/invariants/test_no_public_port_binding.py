@@ -1,4 +1,4 @@
-"""SPEC 17.4: the connector is never published on every interface.
+"""SPEC 17.4: the gateway is never published on every interface.
 
 /health and /metrics are deliberately unauthenticated, which is only safe
 because the port is unreachable from outside the tailnet. A bare

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import pytest
 from zoneinfo import ZoneInfo
 
-from connector.clock import (
+from gateway.clock import (
     AMD_TIMEZONE,
     LOGIN_TIER,
     TIER_CAPS,

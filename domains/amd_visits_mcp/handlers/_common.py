@@ -79,11 +79,11 @@ def summarize_by(rows: list[dict[str, str]], key: str) -> dict[str, int]:
 
 
 # --------------------------------------------------------------------
-# Async bridge to the connector's client shim (SPEC 4.4, Amendment D-2).
+# Async bridge to the gateway's client shim (SPEC 4.4, Amendment D-2).
 #
 # amd_mcp_common.errors.safe_amd_call is synchronous: it was written for
-# the vendored blocking AMDClient. In the connector the client is
-# connector/client_shim.py, whose call() is a coroutine that awaits
+# the vendored blocking AMDClient. In the gateway the client is
+# gateway/client_shim.py, whose call() is a coroutine that awaits
 # send(). Calling the sync helper here would hand the handler an
 # un-awaited coroutine instead of a reply tree.
 #
@@ -104,7 +104,7 @@ async def safe_amd_call_async(client, *, action: str, raw_to_dict_fn, **kwargs):
     import inspect as _inspect
 
     from amd_mcp_common.errors import translate_amd_error
-    from connector.errors import ConnectorError
+    from gateway.errors import ConnectorError
 
     try:
         raw = client.call(action=action, **kwargs)

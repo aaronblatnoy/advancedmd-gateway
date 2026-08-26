@@ -26,6 +26,16 @@ Success 200
 ```
 `result` is the handler's dict, redacted per the caller's token.
 
+One key is additionally gated. `amd_ehr_getehrnotes` returns
+`raw_xml` — AMD's `<patientnotelist>` re-serialized into a
+`<PPMDResults>` envelope — and it is the only tool that does. It is
+delivered ONLY to a token carrying **both** `phi` and `raw_xml`
+(SPEC 17.1); for anyone else the key is OMITTED from `result` entirely,
+not blanked or nulled, so its absence cannot be used to probe
+entitlement. When the patient has no notes an entitled caller gets an
+empty shell with `patientnotecount="0"`, not a missing key. See
+[GATEWAY_DECISIONS.md](GATEWAY_DECISIONS.md) D27.
+
 Error (status per the table in section 14 below)
 ```json
 {"ok": false,
@@ -67,7 +77,7 @@ all five SPEC 9.3 checklist items are recorded; `verification` reports
 them one by one, each either `"pending"` or what was recorded (for the
 live check, the operator's date). `served` says whether the worker will
 run the handler -- the same as `verified`, unless
-`CONNECTOR_SERVE_PENDING_VERIFICATION` is on (SPEC 9.3, 19). `name` is the canonical
+`GATEWAY_SERVE_PENDING_VERIFICATION` is on (SPEC 9.3, 19). `name` is the canonical
 registry key; bare AMD action-name aliases (Amendment A1) resolve to the
 same entry but are not separately listed here.
 
@@ -134,5 +144,5 @@ bodies. `amd_fault` includes AMD's code and its short description only
 `tools/call` on any `/mcp/<domain>` or `/mcp/all` route is routed
 through the same receiver code path as `POST /v1/tools`, so auth,
 priority, per-caller queue caps, and redaction are derived once. Errors
-map to MCP error responses carrying the connector error code above in
+map to MCP error responses carrying the gateway error code above in
 the message. See README.md for the three ways to attach an agent.

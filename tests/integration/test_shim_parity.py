@@ -1,8 +1,8 @@
 """SPEC 12.3, 12.4: the local stdio shim, and its parity with 12.2.
 
-The shim is started against a MOCK connector built from the same fake
+The shim is started against a MOCK gateway built from the same fake
 registry the remote-surface test uses. Nothing here starts a real
-connector, contacts AdvancedMD, or uses a credential: the two tokens are
+gateway, contacts AdvancedMD, or uses a credential: the two tokens are
 the synthetic ones from conftest and the one result value is the string
 "synthetic".
 
@@ -38,7 +38,7 @@ from advancedmd_mcp.__main__ import (  # noqa: E402
     main,
     resolve_environment,
 )
-from connector.mcp_surface import ROUTE_DOMAINS, SESSION_HEADER, mount_mcp, tool_row  # noqa: E402
+from gateway.mcp_surface import ROUTE_DOMAINS, SESSION_HEADER, mount_mcp, tool_row  # noqa: E402
 from tests.integration.test_mcp_surface import (  # noqa: E402
     AUTH,
     BATCH_AUTH,
@@ -47,7 +47,7 @@ from tests.integration.test_mcp_surface import (  # noqa: E402
     FakeRegistry,
 )
 
-# ------------------------------------------------------- mock connector
+# ------------------------------------------------------- mock gateway
 
 
 @pytest.fixture
@@ -56,10 +56,10 @@ def deps(token_table) -> FakeDeps:
 
 
 @pytest.fixture
-def mock_connector(deps: FakeDeps) -> FastAPI:
-    """A stand-in connector: GET/POST /v1/tools plus the MCP surface.
+def mock_gateway(deps: FakeDeps) -> FastAPI:
+    """A stand-in gateway: GET/POST /v1/tools plus the MCP surface.
 
-    GET /v1/tools is built with connector.mcp_surface.tool_row, which is
+    GET /v1/tools is built with gateway.mcp_surface.tool_row, which is
     exactly what SPEC 11.3 says the real route returns, so the parity
     test compares the two surfaces and not two hand-written lists.
     """
@@ -122,16 +122,16 @@ def mock_connector(deps: FakeDeps) -> FastAPI:
 
 
 @pytest.fixture
-def connector_client(mock_connector: FastAPI) -> httpx.AsyncClient:
-    transport = httpx.ASGITransport(app=mock_connector)
+def gateway_client(mock_gateway: FastAPI) -> httpx.AsyncClient:
+    transport = httpx.ASGITransport(app=mock_gateway)
     return httpx.AsyncClient(transport=transport,
-                             base_url="http://connector.invalid")
+                             base_url="http://gateway.invalid")
 
 
-def make_shim(connector_client: httpx.AsyncClient, domain: str,
+def make_shim(gateway_client: httpx.AsyncClient, domain: str,
               token: str = "test-interactive-token") -> Shim:
-    return Shim(domain=domain, base_url="http://connector.invalid",
-                token=token, client=connector_client)
+    return Shim(domain=domain, base_url="http://gateway.invalid",
+                token=token, client=gateway_client)
 
 
 async def shim_rpc(shim: Shim, method: str, params: Any = None,
@@ -143,9 +143,9 @@ async def shim_rpc(shim: Shim, method: str, params: Any = None,
     return await shim.handle(message)
 
 
-async def remote_tools(connector_client: httpx.AsyncClient, domain: str,
+async def remote_tools(gateway_client: httpx.AsyncClient, domain: str,
                        headers=AUTH) -> list[dict[str, Any]]:
-    response = await connector_client.post(
+    response = await gateway_client.post(
         f"/mcp/{domain}",
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
         headers=headers)
@@ -158,23 +158,23 @@ async def remote_tools(connector_client: httpx.AsyncClient, domain: str,
 
 @pytest.mark.parametrize("domain", ROUTE_DOMAINS)
 async def test_shim_tools_list_matches_the_remote_surface(
-    connector_client: httpx.AsyncClient, domain: str
+    gateway_client: httpx.AsyncClient, domain: str
 ):
-    async with connector_client:
-        shim = make_shim(connector_client, domain)
+    async with gateway_client:
+        shim = make_shim(gateway_client, domain)
         local = (await shim_rpc(shim, "tools/list"))["result"]["tools"]
-        remote = await remote_tools(connector_client, domain)
+        remote = await remote_tools(gateway_client, domain)
     assert local == remote
 
 
 async def test_parity_holds_for_a_restricted_token(
-    connector_client: httpx.AsyncClient
+    gateway_client: httpx.AsyncClient
 ):
-    async with connector_client:
-        shim = make_shim(connector_client, "patients",
+    async with gateway_client:
+        shim = make_shim(gateway_client, "patients",
                          token="test-batch-token")
         local = (await shim_rpc(shim, "tools/list"))["result"]["tools"]
-        remote = await remote_tools(connector_client, "patients",
+        remote = await remote_tools(gateway_client, "patients",
                                     headers=BATCH_AUTH)
     assert local == remote
     assert [t["name"] for t in local] == ["amd_patients_get_demographic",
@@ -182,10 +182,10 @@ async def test_parity_holds_for_a_restricted_token(
 
 
 async def test_the_parity_check_is_not_vacuous(
-    connector_client: httpx.AsyncClient
+    gateway_client: httpx.AsyncClient
 ):
-    async with connector_client:
-        local = (await shim_rpc(make_shim(connector_client, "all"),
+    async with gateway_client:
+        local = (await shim_rpc(make_shim(gateway_client, "all"),
                                 "tools/list"))["result"]["tools"]
     assert len(local) == len(ENTRIES)
     assert any(t["description"].endswith("(unverified)") for t in local)
@@ -194,9 +194,9 @@ async def test_the_parity_check_is_not_vacuous(
 # ------------------------------------------------------------- the shim
 
 
-async def test_initialize(connector_client: httpx.AsyncClient):
-    async with connector_client:
-        response = await shim_rpc(make_shim(connector_client, "patients"),
+async def test_initialize(gateway_client: httpx.AsyncClient):
+    async with gateway_client:
+        response = await shim_rpc(make_shim(gateway_client, "patients"),
                                   "initialize",
                                   {"protocolVersion": MCP_PROTOCOL_VERSION})
     result = response["result"]
@@ -205,12 +205,12 @@ async def test_initialize(connector_client: httpx.AsyncClient):
 
 
 async def test_the_tool_list_is_cached_for_the_session(
-    connector_client: httpx.AsyncClient
+    gateway_client: httpx.AsyncClient
 ):
     calls = {"n": 0}
 
-    async with connector_client:
-        shim = make_shim(connector_client, "patients")
+    async with gateway_client:
+        shim = make_shim(gateway_client, "patients")
 
         get = shim._client.get
 
@@ -226,11 +226,11 @@ async def test_the_tool_list_is_cached_for_the_session(
 
 
 async def test_tools_call_becomes_post_v1_tools(
-    connector_client: httpx.AsyncClient, deps: FakeDeps
+    gateway_client: httpx.AsyncClient, deps: FakeDeps
 ):
-    async with connector_client:
+    async with gateway_client:
         response = await shim_rpc(
-            make_shim(connector_client, "patients"), "tools/call",
+            make_shim(gateway_client, "patients"), "tools/call",
             {"name": "amd_patients_get_demographic",
              "arguments": {"synthetic_id": "0"}})
     assert response["result"]["structuredContent"] == {"value": "synthetic"}
@@ -239,14 +239,14 @@ async def test_tools_call_becomes_post_v1_tools(
 
 
 async def test_shim_error_mapping_matches_the_remote_surface(
-    connector_client: httpx.AsyncClient
+    gateway_client: httpx.AsyncClient
 ):
     params = {"name": "amd_patients_save_demographic", "arguments": {}}
-    async with connector_client:
-        shim = make_shim(connector_client, "patients",
+    async with gateway_client:
+        shim = make_shim(gateway_client, "patients",
                          token="test-batch-token")
         local = await shim_rpc(shim, "tools/call", params)
-        response = await connector_client.post(
+        response = await gateway_client.post(
             "/mcp/patients",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                   "params": params},
@@ -257,11 +257,11 @@ async def test_shim_error_mapping_matches_the_remote_surface(
     assert local["error"]["data"]["code"] == remote["error"]["data"]["code"]
 
 
-async def test_unreachable_connector_is_reported_not_raised(
-    connector_client: httpx.AsyncClient
+async def test_unreachable_gateway_is_reported_not_raised(
+    gateway_client: httpx.AsyncClient
 ):
-    async with connector_client:
-        shim = make_shim(connector_client, "patients")
+    async with gateway_client:
+        shim = make_shim(gateway_client, "patients")
 
         async def boom(*args, **kwargs):
             raise httpx.ConnectError("synthetic connect failure")
@@ -273,21 +273,21 @@ async def test_unreachable_connector_is_reported_not_raised(
     assert "synthetic connect failure" not in json.dumps(response)
 
 
-async def test_notifications_get_no_reply(connector_client: httpx.AsyncClient):
-    async with connector_client:
-        shim = make_shim(connector_client, "patients")
+async def test_notifications_get_no_reply(gateway_client: httpx.AsyncClient):
+    async with gateway_client:
+        shim = make_shim(gateway_client, "patients")
         assert await shim.handle({"jsonrpc": "2.0",
                                   "method": "notifications/initialized"}) is None
 
 
 async def test_run_stdio_speaks_newline_delimited_json(
-    connector_client: httpx.AsyncClient
+    gateway_client: httpx.AsyncClient
 ):
     stdin = io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1,
                                     "method": "tools/list"}) + "\n")
     stdout = io.StringIO()
-    async with connector_client:
-        await make_shim(connector_client, "system").run_stdio(stdin, stdout)
+    async with gateway_client:
+        await make_shim(gateway_client, "system").run_stdio(stdin, stdout)
     lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
     assert len(lines) == 1
     assert lines[0]["result"]["tools"][0]["name"] == "amd_system_get_sys_defaults"
@@ -311,26 +311,26 @@ def test_missing_environment_names_the_variables():
     with pytest.raises(ConfigMissing) as excinfo:
         resolve_environment({})
     message = str(excinfo.value)
-    assert "ADVANCEDMD_CONNECTOR_URL" in message
-    assert "ADVANCEDMD_CONNECTOR_TOKEN" in message
+    assert "ADVANCEDMD_GATEWAY_URL" in message
+    assert "ADVANCEDMD_GATEWAY_TOKEN" in message
 
     with pytest.raises(ConfigMissing) as excinfo:
-        resolve_environment({"ADVANCEDMD_CONNECTOR_URL": "http://x.invalid"})
-    assert "ADVANCEDMD_CONNECTOR_TOKEN" in str(excinfo.value)
+        resolve_environment({"ADVANCEDMD_GATEWAY_URL": "http://x.invalid"})
+    assert "ADVANCEDMD_GATEWAY_TOKEN" in str(excinfo.value)
 
 
 def test_main_exits_2_when_the_environment_is_incomplete(monkeypatch, capsys):
-    monkeypatch.delenv("ADVANCEDMD_CONNECTOR_URL", raising=False)
-    monkeypatch.delenv("ADVANCEDMD_CONNECTOR_TOKEN", raising=False)
+    monkeypatch.delenv("ADVANCEDMD_GATEWAY_URL", raising=False)
+    monkeypatch.delenv("ADVANCEDMD_GATEWAY_TOKEN", raising=False)
     assert main(["--domain", "patients"]) == 2
-    assert "ADVANCEDMD_CONNECTOR_URL" in capsys.readouterr().err
+    assert "ADVANCEDMD_GATEWAY_URL" in capsys.readouterr().err
 
 
 def test_environment_is_read_without_being_echoed(monkeypatch):
-    monkeypatch.setenv("ADVANCEDMD_CONNECTOR_URL", "http://connector.invalid")
-    monkeypatch.setenv("ADVANCEDMD_CONNECTOR_TOKEN", "synthetic-token")
+    monkeypatch.setenv("ADVANCEDMD_GATEWAY_URL", "http://gateway.invalid")
+    monkeypatch.setenv("ADVANCEDMD_GATEWAY_TOKEN", "synthetic-token")
     url, token = resolve_environment()
-    assert url == "http://connector.invalid"
+    assert url == "http://gateway.invalid"
     assert token == "synthetic-token"
 
 

@@ -1,7 +1,7 @@
 """advancedmd-mcp: the local stdio shim. SPEC 12.3.
 
 It speaks MCP over stdio to an agent on a workstation and turns every
-call into an HTTP request to the connector. It holds no AdvancedMD
+call into an HTTP request to the gateway. It holds no AdvancedMD
 credentials, no tool logic and no AdvancedMD knowledge: the tool list
 comes from GET /v1/tools at start-up and every tools/call becomes POST
 /v1/tools. Swapping an agent between this shim and the remote surface

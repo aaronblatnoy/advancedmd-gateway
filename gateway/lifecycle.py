@@ -3,9 +3,9 @@
 This module owns two things:
 
 1. `Deps` -- the single injection seam for the whole HTTP surface. Lane D
-   (app.py, receiver.py) never imports connector.clock, connector.sender,
-   connector.session, connector.worker, connector.registry,
-   connector.tokens, connector.audit or connector.metrics. It reads them
+   (app.py, receiver.py) never imports gateway.clock, gateway.sender,
+   gateway.session, gateway.worker, gateway.registry,
+   gateway.tokens, gateway.audit or gateway.metrics. It reads them
    off a Deps instance. Tests build a Deps out of the conftest fakes; P2
    builds the real one by filling in `wire_real_deps` below. That single
    function is the only place a real singleton is named.
@@ -28,11 +28,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from connector import logging_filter
-from connector.config import Config
-from connector.errors import ConnectorTimeout
-from connector.queues import EntryQueue, RequestQueue
-from connector.verification import default_table
+from gateway import logging_filter
+from gateway.config import Config
+from gateway.errors import ConnectorTimeout
+from gateway.queues import EntryQueue, RequestQueue
+from gateway.verification import default_table
 
 __all__ = [
     "Deps",
@@ -46,7 +46,7 @@ __all__ = [
     "wire_real_deps",
 ]
 
-log = logging.getLogger("connector.lifecycle")
+log = logging.getLogger("gateway.lifecycle")
 
 #: SPEC 16.1 step 7: retry login on the login bucket with this backoff,
 #: then every 300 s.
@@ -71,23 +71,23 @@ class Deps:
 
     P2 swaps the fakes for the real singletons by changing
     `wire_real_deps` and nothing else. Every field typed `Any` is a
-    Protocol from connector.interfaces; it is typed loosely here so this
+    Protocol from gateway.interfaces; it is typed loosely here so this
     module imports no lane's implementation.
     """
 
     config: Config
-    #: connector.interfaces.RateClock
+    #: gateway.interfaces.RateClock
     clock: Any
-    #: connector.interfaces.Session
+    #: gateway.interfaces.Session
     session: Any
-    #: connector.interfaces.TokenTable
+    #: gateway.interfaces.TokenTable
     token_table: Any
-    #: connector.interfaces.Registry
+    #: gateway.interfaces.Registry
     registry: Any
     entry_queue: EntryQueue
     request_queue: RequestQueue
 
-    #: connector.interfaces.Auditor, optional for the HTTP surface.
+    #: gateway.interfaces.Auditor, optional for the HTTP surface.
     auditor: Any = None
     #: An object exposing render() -> (text, content_type) for SPEC 11.5.
     metrics: Any = None
@@ -121,7 +121,7 @@ class _DeferredRegistry:
     Deps is constructed before SPEC 16.1 step 4 has run, but Deps.registry
     is a plain field, so this handle stands in and `bind()` fills it. Any
     read before startup raises rather than quietly reporting an empty
-    catalogue -- a connector that answers GET /v1/tools with nothing is
+    catalogue -- a gateway that answers GET /v1/tools with nothing is
     worse than one that says it is not ready.
     """
 
@@ -173,7 +173,7 @@ class _AuditingMetrics:
     rule in one place: a value that may not appear in an audit line may
     not appear on a metric label either, because these are the same
     values. Nothing caller-supplied but the caller name and the tool name
-    is read, and connector/metrics.py sanitises both.
+    is read, and gateway/metrics.py sanitises both.
     """
 
     def __init__(self, auditor: Any, metrics: Any) -> None:
@@ -207,7 +207,7 @@ class _AuditingMetrics:
 class _MetricsView:
     """render() with the gauges refreshed. SPEC 11.5, 18.1.
 
-    The counters and histograms live in connector/metrics.py; the depths
+    The counters and histograms live in gateway/metrics.py; the depths
     and the clock window are read live at scrape time, which is the only
     moment they mean anything.
     """
@@ -238,20 +238,20 @@ def wire_real_deps(config: Config) -> Deps:
     and one Metrics. Everything downstream shares them by reference; no
     module reaches for a second copy.
 
-    The imports are function-local on purpose. connector/app.py and
-    connector/receiver.py must not import a lane implementation even
+    The imports are function-local on purpose. gateway/app.py and
+    gateway/receiver.py must not import a lane implementation even
     transitively (they import this module), and the SPEC 23.6 grep would
-    otherwise see connector.sender's httpx through lifecycle.
+    otherwise see gateway.sender's httpx through lifecycle.
     """
-    from connector import sender as sender_module
-    from connector.audit import Auditor
-    from connector.client_shim import AMDClient
-    from connector.clock import RateClock, tier_for
-    from connector.metrics import Metrics
-    from connector.registry import build_registry
-    from connector.session import AmdSession, LoginChecker
-    from connector.tokens import TokenTable
-    from connector.worker import Worker, install_client_factories
+    from gateway import sender as sender_module
+    from gateway.audit import Auditor
+    from gateway.client_shim import AMDClient
+    from gateway.clock import RateClock, tier_for
+    from gateway.metrics import Metrics
+    from gateway.registry import build_registry
+    from gateway.session import AmdSession, LoginChecker
+    from gateway.tokens import TokenTable
+    from gateway.worker import Worker, install_client_factories
 
     instance_id = uuid.uuid4().hex[:12]
 
@@ -267,7 +267,7 @@ def wire_real_deps(config: Config) -> Deps:
     )
     session = AmdSession(config, clock)
     token_table = TokenTable(
-        config.connector_tokens_path,
+        config.gateway_tokens_path,
         write_tools_enabled=config.write_tools_enabled,
     )
     registry = _DeferredRegistry()
@@ -282,7 +282,7 @@ def wire_real_deps(config: Config) -> Deps:
         session=session,
         post_timeout_s=config.amd_post_timeout_s,
     )
-    # Register the process's sender so connector.sender.send() -- the one
+    # Register the process's sender so gateway.sender.send() -- the one
     # function handlers may call -- has a queue to put requests on.
     sender_module.install(sender, request_queue)
     # Copied handlers get their AMDClient from the worker's ContextVar.
@@ -433,7 +433,7 @@ class Lifecycle:
                 self._tasks.append(asyncio.ensure_future(run()))
         # 6. Begin serving; /health reports "starting".
         self.started_at = d.monotonic()
-        log.info("connector starting", extra={"instance_id": d.instance_id})
+        log.info("gateway starting", extra={"instance_id": d.instance_id})
         # 7. Attempt login through the login bucket, in the background so
         #    /health answers immediately.
         self._login_task = asyncio.ensure_future(self._login_loop())
@@ -502,7 +502,7 @@ class Lifecycle:
         return self.deps.entry_queue.depth >= cap * QUEUE_DEGRADED_RATIO
 
     def serving_pending_verification(self) -> bool:
-        """SPEC 19 CONNECTOR_SERVE_PENDING_VERIFICATION, as /health sees it.
+        """SPEC 19 GATEWAY_SERVE_PENDING_VERIFICATION, as /health sees it.
 
         True means tools whose only missing SPEC 9.3 item is the operator
         live check are being served. That is a non-production posture, so
@@ -527,6 +527,18 @@ class Lifecycle:
     # ------------------------------------------------------ shutdown
 
     def install_signal_handlers(self) -> None:
+        # SPEC 10.1: SIGHUP forces a token-table re-read. It needs no
+        # event loop, and the installer already ignores the platforms and
+        # host threads that forbid registering a handler, so it is
+        # attempted before the loop is looked up.
+        install_sighup = getattr(
+            self.deps.token_table, "install_sighup_handler", None
+        )
+        if install_sighup is not None:
+            try:
+                install_sighup()
+            except Exception:  # noqa: BLE001 - never fail startup on this
+                log.warning("SIGHUP token-table reload is unavailable")
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:  # pragma: no cover - not on a loop
@@ -582,4 +594,4 @@ class Lifecycle:
             d.clock.flush()
         except Exception:  # pragma: no cover - a flush failure must not hang exit
             log.warning("clock state flush failed during shutdown")
-        log.info("connector shutdown complete")
+        log.info("gateway shutdown complete")

@@ -1047,7 +1047,7 @@ STUB / WRITE-GATED — no real AMD call performed. `handle()` unconditionally ra
 
 # Verification ledger (SPEC 9.3)
 
-Appended by the connector build. This section is the per-tool record SPEC
+Appended by the gateway build. This section is the per-tool record SPEC
 9.3 requires before a tool may be marked verified. Everything above this
 line is the original survey of the copied handlers and is unchanged.
 
@@ -1064,8 +1064,8 @@ Each entry records the five checklist steps:
    from the reference clients' XML shapes, plus the Appendix B assertion
    in `tests/integration/test_tools_verified.py`. These are NOT recordings:
    SPEC 23.3 step 4 governs, and no live recording was made.
-4. **Tier** - the SPEC 7.4 tier. `connector/clock.py` owns the table;
-   `connector/registry.py` consumes it and never re-derives it.
+4. **Tier** - the SPEC 7.4 tier. `gateway/clock.py` owns the table;
+   `gateway/registry.py` consumes it and never re-derives it.
 5. **Defects** - the Appendix C items fixed for this tool.
 
 The request map for all nine tools is also machine-readable in
@@ -1076,7 +1076,7 @@ asserts each handler's `XmlRequest` against.
 
 - Tool: `amd_patients_get_demographic` (alias `getdemographic`), patients
 - Request: action `getdemographic`, class `demographics`, attr `patientid`.
-  No children. Source: `connector/client_shim.get_patient_bundle`,
+  No children. Source: `gateway/client_shim.get_patient_bundle`,
   transcribed from all four backend vendored clients.
 - Live check: **PENDING OPERATOR**
 - Fixture: `tests/fixtures/getdemographic.reply.xml`
@@ -1147,7 +1147,7 @@ asserts each handler's `XmlRequest` against.
 - Tier: **1**
 - Defects fixed: Appendix C 4 - the copied policy file
   (`knowledge/integrations/amd/visits/getupdatedvisits.policy.data.json`)
-  already carries `tier: 1`, and `connector/registry.default_tier_for`
+  already carries `tier: 1`, and `gateway/registry.default_tier_for`
   returns 1. The handler's `TIER = 2` constant is ignored per SPEC 7.4; a
   unit test pins both.
 
@@ -1193,7 +1193,7 @@ asserts each handler's `XmlRequest` against.
 - Gating: three keys must turn - `WRITE_TOOLS_ENABLED` (SPEC 9.1),
   `may_write` carrying this tool on the caller's token (SPEC 10.3), and
   the tool being verified (SPEC 9.2). All three are enforced in
-  `connector/worker.py` and tested.
+  `gateway/worker.py` and tested.
 
 ## verification-ledger-getehrnotes
 
@@ -1205,8 +1205,42 @@ asserts each handler's `XmlRequest` against.
   note-audit's vendored client (`fetch_note_raw`).
 - Live check: **PENDING OPERATOR**
 - Fixture: `tests/fixtures/getehrnotes.reply.xml`
-- Result shape (Appendix B): `{patient_id, count}`. Count only - no note
-  text and no raw blob leaves the handler.
+- Result shape (Appendix B): `{patient_id, count, raw_xml}`. `patient_id`
+  and `count` are unchanged and stay frozen; `raw_xml` was ADDED (additive
+  fields are not a /v2 event, SPEC 11.6). This is the gateway's ONLY
+  `raw_xml` producer - see `docs/GATEWAY_DECISIONS.md` D27 for all seven
+  design rules.
+- `raw_xml` provenance (D-R4-2): the string is RE-SERIALIZED from the tree
+  `gateway/sender.py::send()` already parsed -
+  `etree.tostring(..., encoding="unicode")` - not captured from the wire.
+  There is deliberately no raw-bytes side channel, no retained response
+  buffer and no "last body" ContextVar anywhere: each would be a
+  process-wide place an AMD body could live outside the record that asked
+  for it. The reference consumer does the same thing (note-audit's
+  `fetch_note_raw` builds a fresh `<PPMDResults>` wrapper and tostrings
+  it), so byte-fidelity to AMD's literal body is no consumer's
+  requirement. Do not "fix" this into a raw-bytes path.
+- `raw_xml` content (D-R4-3): the FULL `<patientnotelist>` subtree, copied
+  whole into a fresh `<PPMDResults><Results success="1"
+  patientnotecount="N">` wrapper - every `patientnote`, `page` and `field`
+  in AMD's own spellings. Not a projection: note-audit date-filters and
+  re-wraps on its side, and projecting here would reimplement the note
+  parser inside the gateway. When AMD returns no notes the value is that
+  same shell with `patientnotecount="0"` and an empty `<patientnotelist/>`,
+  so a caller can tell "no notes" from "not entitled" - absence of the key
+  means only the latter.
+- `raw_xml` delivery: the handler NEVER inspects the token (D-R4-5). It
+  always produces the key; `gateway/worker.py::_apply_result_policy` strips
+  it (key omitted, plus the Redactor's `raw_xml_hash` sidecar) for anyone
+  lacking BOTH `phi` and `raw_xml`. note-audit is the only holder
+  (SPEC 10.4). Pinned by
+  `tests/integration/test_getehrnotes_raw_xml.py` and
+  `tests/invariants/test_raw_xml_producer_gated.py`.
+- Accessor note: `handlers/_common.py` gained
+  `safe_amd_call_element_async`, a 3-tuple `(element, raw_dict, err)`
+  variant, because the 2-tuple wrapper discards the parsed element.
+  `safe_amd_call_async` now delegates to it and is otherwise unchanged, so
+  every other handler's call site and result shape are untouched.
 - Tier: 2
 - Defects fixed: Appendix C 1, for this tool only (Amendment D-3). The
   handler previously sent no `class_` and the Python-style attribute
@@ -1261,7 +1295,7 @@ asserts each handler's `XmlRequest` against.
 - **The synchronous `safe_amd_call` bridge.** The copied handlers call
   `amd_mcp_common.errors.safe_amd_call`, which was written for a blocking
   client and would hand back an un-awaited coroutine under
-  `connector/client_shim.py`. Each affected domain's `handlers/_common.py`
+  `gateway/client_shim.py`. Each affected domain's `handlers/_common.py`
   gained `safe_amd_call_async`, identical except that it awaits the
   result and lets a `ConnectorError` propagate to the worker instead of
   swallowing it into an `{"error": ...}` envelope. The copied

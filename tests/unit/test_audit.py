@@ -6,14 +6,14 @@ import json
 
 import pytest
 
-from connector.audit import (
+from gateway.audit import (
     AUDIT_KEYS,
     Auditor,
     AuditKeyError,
     AuditValueError,
     serialize,
 )
-from connector.queues import PRIORITY_BATCH
+from gateway.queues import PRIORITY_BATCH
 
 # The SPEC 17.2 example line, transcribed. Synthetic values only.
 GOOD = {

@@ -16,9 +16,9 @@ import httpx
 import pytest
 from lxml import etree
 
-from connector.errors import AmdFault, AmdUnavailable, InternalError, SessionFailed
-from connector.queues import PRIORITY_INTERACTIVE, RequestQueue, XmlRequest
-from connector.sender import (
+from gateway.errors import AmdFault, AmdUnavailable, InternalError, SessionFailed
+from gateway.queues import PRIORITY_INTERACTIVE, RequestQueue, XmlRequest
+from gateway.sender import (
     AMD_CONTENT_TYPE,
     RETRY_BACKOFFS,
     Sender,
@@ -29,7 +29,13 @@ from connector.sender import (
     parse_reply,
     send,
 )
-from tests.conftest import FakeClock, FakeSession, synthetic_fault, synthetic_reply
+from tests.conftest import (
+    FakeClock,
+    FakeSession,
+    sync_slot,
+    synthetic_fault,
+    synthetic_reply,
+)
 
 SYNTHETIC = (
     "synthetic fixture - hand-written from reference client XML shapes, "
@@ -69,6 +75,7 @@ def make_request(action: str = "getdemographic", **attrs) -> XmlRequest:
         record_id="00000000-0000-4000-8000-000000000000",
         priority=PRIORITY_INTERACTIVE,
         attrs={k: str(v) for k, v in attrs.items()},
+        slot=sync_slot(),
     )
 
 

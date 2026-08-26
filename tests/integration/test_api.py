@@ -1,7 +1,7 @@
 """SPEC 11 end to end, plus SPEC 16 lifecycle. Lane D.
 
 Everything here runs against the injected Deps seam
-(connector.lifecycle.Deps) built from the conftest fakes and the
+(gateway.lifecycle.Deps) built from the conftest fakes and the
 in-process mock AMD. No network, no credentials, no PHI: every id in
 this file is visibly synthetic.
 
@@ -19,9 +19,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from connector.app import create_app
-from connector.config import load_config
-from connector.errors import (
+from gateway.app import create_app
+from gateway.config import load_config
+from gateway.errors import (
     AmdFault,
     AmdUnavailable,
     LoginBucketWait,
@@ -32,11 +32,17 @@ from connector.errors import (
     ToolUnverified,
     QueueWaitExceeded,
 )
-from connector.interfaces import Caller, RegistryEntry
-from connector.lifecycle import Deps, Lifecycle
-from connector.queues import PRIORITY_BATCH, EntryQueue, RequestQueue
+from gateway.interfaces import Caller, RegistryEntry
+from gateway.lifecycle import Deps, Lifecycle
+from gateway.queues import PRIORITY_BATCH, EntryQueue, RequestQueue
 
-from tests.conftest import BASE_ENV, FakeClock, FakeSession, FakeTokenTable
+from tests.conftest import (
+    BASE_ENV,
+    FakeClock,
+    FakeSession,
+    FakeTokenTable,
+    sync_slot,
+)
 from tests.integration.mock_amd import (
     MOCK_OFFICE_KEY,
     MOCK_PASSWORD,
@@ -347,11 +353,11 @@ def test_per_caller_queue_cap():
 
 
 def _stub_record(deps: Deps, caller: str):
-    from connector.queues import ToolRequest
+    from gateway.queues import ToolRequest
 
     return ToolRequest(tool="getdemographic", args={}, caller=caller,
                        priority=0, arrived_at=deps.monotonic(),
-                       max_wait_ms=20000)
+                       max_wait_ms=20000, slot=sync_slot())
 
 
 def test_queue_wait_exceeded():
@@ -444,8 +450,8 @@ async def test_login_bucket_wait_comes_from_the_real_login_checker():
     session factory -- AdvancedMD is never contacted, and no login slot is
     spent answering the wait=false caller.
     """
-    from connector.clock import LOGIN_TIER, RateClock
-    from connector.session import LoginChecker
+    from gateway.clock import LOGIN_TIER, RateClock
+    from gateway.session import LoginChecker
 
     ticker = {"t": 1000.0}
 
@@ -590,7 +596,7 @@ def test_health_shape_and_no_token_required():
 
 def test_health_reports_and_degrades_on_serving_pending_verification():
     """SPEC 9.3 / 19: the pre-live-check posture is announced, not hidden."""
-    deps, _ = build_deps({"CONNECTOR_SERVE_PENDING_VERIFICATION": "true"})
+    deps, _ = build_deps({"GATEWAY_SERVE_PENDING_VERIFICATION": "true"})
     with client(deps) as c:
         for _ in range(50):
             body = c.get("/health").json()
@@ -803,7 +809,7 @@ async def test_slow_amd_reply_does_not_delay_health():
     await life.startup()
     try:
         async with httpx.AsyncClient(transport=transport,
-                                     base_url="http://connector.invalid") as ac:
+                                     base_url="http://gateway.invalid") as ac:
             call = asyncio.ensure_future(
                 ac.post("/v1/tools", json={"tool": "getdemographic"},
                         headers={"Authorization": f"Bearer {INTERACTIVE}"})

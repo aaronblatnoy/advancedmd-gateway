@@ -1,11 +1,11 @@
 """Configuration, SPEC 19.
 
-The whole environment surface of the connector is this one frozen
-dataclass. Nothing else reads os.environ for connector settings.
+The whole environment surface of the gateway is this one frozen
+dataclass. Nothing else reads os.environ for gateway settings.
 
 Note on AMD_BASE_URL: the default AMD partner-login URL deliberately does
 NOT live here. SPEC 6.2 / 23.6 keep every AMD URL inside
-connector/sender.py and connector/session.py; config carries only an
+gateway/sender.py and gateway/session.py; config carries only an
 operator override, empty by default, and session.py supplies the real
 default when the override is empty.
 """
@@ -20,8 +20,8 @@ from typing import Mapping
 DEFAULTS: dict[str, str] = {
     "AMD_APP_NAME": "TEMP",
     "AMD_BASE_URL": "",
-    "CONNECTOR_PORT": "8820",
-    "CONNECTOR_BIND": "127.0.0.1",
+    "GATEWAY_PORT": "8820",
+    "GATEWAY_BIND": "127.0.0.1",
     "CLOCK_STATE_PATH": "/data/clock.json",
     "CLOCK_MARGIN": "0.90",
     "EXECUTION_ALLOWANCE_MS": "120000",
@@ -32,7 +32,7 @@ DEFAULTS: dict[str, str] = {
     "SHUTDOWN_DRAIN_S": "30",
     "LOG_LEVEL": "INFO",
     "WRITE_TOOLS_ENABLED": "false",
-    "CONNECTOR_SERVE_PENDING_VERIFICATION": "false",
+    "GATEWAY_SERVE_PENDING_VERIFICATION": "false",
     "MCP_SESSION_IDLE_S": "3600",
 }
 
@@ -40,7 +40,7 @@ REQUIRED: tuple[str, ...] = (
     "AMD_USERNAME",
     "AMD_PASSWORD",
     "AMD_OFFICE_KEY",
-    "CONNECTOR_TOKENS_PATH",
+    "GATEWAY_TOKENS_PATH",
 )
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -62,12 +62,12 @@ class Config:
     amd_username: str
     amd_password: str
     amd_office_key: str
-    connector_tokens_path: str
+    gateway_tokens_path: str
     # optional
     amd_app_name: str = "TEMP"
     amd_base_url: str = ""
-    connector_port: int = 8820
-    connector_bind: str = "127.0.0.1"
+    gateway_port: int = 8820
+    gateway_bind: str = "127.0.0.1"
     clock_state_path: str = "/data/clock.json"
     clock_margin: float = 0.90
     execution_allowance_ms: int = 120000
@@ -81,7 +81,7 @@ class Config:
     #: SPEC 9.3 / 19. False in production: a tool whose SPEC 9.3 live
     #: check is still PENDING OPERATOR is not served and the worker
     #: answers tool_unverified. True serves tools whose ONLY missing
-    #: checklist item is that operator live check, so the connector can
+    #: checklist item is that operator live check, so the gateway can
     #: be exercised end to end before the operator runs it; /health then
     #: reports serving_pending_verification and status degraded.
     serve_pending_verification: bool = False
@@ -94,11 +94,11 @@ class Config:
             "amd_username": "<set>" if self.amd_username else "<unset>",
             "amd_password": "<set>" if self.amd_password else "<unset>",
             "amd_office_key": "<set>" if self.amd_office_key else "<unset>",
-            "connector_tokens_path": self.connector_tokens_path,
+            "gateway_tokens_path": self.gateway_tokens_path,
             "amd_app_name": self.amd_app_name,
             "amd_base_url_override": bool(self.amd_base_url),
-            "connector_port": self.connector_port,
-            "connector_bind": self.connector_bind,
+            "gateway_port": self.gateway_port,
+            "gateway_bind": self.gateway_bind,
             "clock_state_path": self.clock_state_path,
             "clock_margin": self.clock_margin,
             "execution_allowance_ms": self.execution_allowance_ms,
@@ -161,11 +161,11 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         amd_username=env["AMD_USERNAME"].strip(),
         amd_password=env["AMD_PASSWORD"],
         amd_office_key=env["AMD_OFFICE_KEY"].strip(),
-        connector_tokens_path=env["CONNECTOR_TOKENS_PATH"].strip(),
+        gateway_tokens_path=env["GATEWAY_TOKENS_PATH"].strip(),
         amd_app_name=_get(env, "AMD_APP_NAME").strip() or "TEMP",
         amd_base_url=_get(env, "AMD_BASE_URL").strip(),
-        connector_port=_as_int(env, "CONNECTOR_PORT"),
-        connector_bind=_get(env, "CONNECTOR_BIND").strip(),
+        gateway_port=_as_int(env, "GATEWAY_PORT"),
+        gateway_bind=_get(env, "GATEWAY_BIND").strip(),
         clock_state_path=_get(env, "CLOCK_STATE_PATH").strip(),
         clock_margin=_as_float(env, "CLOCK_MARGIN"),
         execution_allowance_ms=_as_int(env, "EXECUTION_ALLOWANCE_MS"),
@@ -177,7 +177,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         log_level=_get(env, "LOG_LEVEL").strip().upper() or "INFO",
         write_tools_enabled=_as_bool(env, "WRITE_TOOLS_ENABLED"),
         serve_pending_verification=_as_bool(
-            env, "CONNECTOR_SERVE_PENDING_VERIFICATION"
+            env, "GATEWAY_SERVE_PENDING_VERIFICATION"
         ),
         mcp_session_idle_s=_as_int(env, "MCP_SESSION_IDLE_S"),
     )
@@ -189,8 +189,8 @@ def _validate(cfg: Config) -> None:
     # SPEC 7.3: CLOCK_MARGIN MUST be <= 1.0.
     if not (0 < cfg.clock_margin <= 1.0):
         raise ConfigError("CLOCK_MARGIN must be greater than 0 and <= 1.0")
-    if not (0 < cfg.connector_port < 65536):
-        raise ConfigError("CONNECTOR_PORT must be a valid TCP port")
+    if not (0 < cfg.gateway_port < 65536):
+        raise ConfigError("GATEWAY_PORT must be a valid TCP port")
     for name, value in (
         ("EXECUTION_ALLOWANCE_MS", cfg.execution_allowance_ms),
         ("BATCH_AGING_MS", cfg.batch_aging_ms),

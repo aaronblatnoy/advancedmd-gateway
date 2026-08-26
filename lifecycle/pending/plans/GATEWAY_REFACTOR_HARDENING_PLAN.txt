@@ -1,0 +1,1671 @@
+=====================================================================
+BUILDOUT PHASE PLAN: advancedmd-gateway -- refactor hardening,
+                     dark deploy, and operator verification
+Generated: 2026-08-25
+Repo:     /Users/aaron_7nh0yzm/advancedmd-connector   (THIS repo only)
+          NOTE: workspace path is still advancedmd-connector. The product
+          is advancedmd-gateway; the folder rename is an operator action.
+          See SECTION -1.
+Scope:    Take the gateway from "886 offline tests green on a laptop
+          with uncommitted audit fixes" to the state SPEC 22 step 0
+          actually requires: running dark on black-sky :8820, Appendix A
+          live-checked by the operator, fairness proven on the box,
+          raw_xml producer implemented and compliance-approved.
+Contract: SPEC.md sections 9, 10, 17, 21, 22, 23 + Appendix A/C/D.
+          SPEC.md WINS. Where this plan disagrees with SPEC.md, SPEC.md
+          is right and this plan is the bug.
+Plan stays in lifecycle/pending/plans/ through every gate; it moves to
+lifecycle/archive/plans/ only when R5 passes. A BLOCK leaves it here.
+=====================================================================
+
+
+---------------------------------------------------------------------
+SECTION -1. EXECUTION STATUS (2026-08-25)
+---------------------------------------------------------------------
+
+This section is the running record of what has actually been executed
+against this plan, and of the corrections the plan needed once the
+first phase ran. It is maintained in place; it does not replace any
+phase text below, and where it corrects a phase it says so explicitly.
+
+-1.1 THE RENAME IS DONE IN-TREE; THE FILESYSTEM AND REMOTE ARE NOT
+
+The advancedmd-connector -> advancedmd-gateway rename landed in the
+working tree on 2026-08-25 as a clean break with no compatibility
+shims. Recorded in memory/decisions/2026-08-25-rename-connector-to-
+gateway.md, which is the authority for the scope of the change.
+
+  DONE in-tree:
+    - Python package connector/ -> gateway/; uvicorn factory is
+      gateway.app:build_app
+    - pyproject.toml project name advancedmd-gateway, console script
+      `gateway`, packages = ["gateway", "domains"]
+    - Env vars CONNECTOR_* -> GATEWAY_* (GATEWAY_TOKENS_PATH,
+      GATEWAY_PORT, GATEWAY_BIND, GATEWAY_SERVE_PENDING_VERIFICATION)
+      and ADVANCEDMD_CONNECTOR_URL/_TOKEN -> ADVANCEDMD_GATEWAY_*
+    - Docker: compose service, image, container_name, named volume,
+      Dockerfile COPY + CMD all read advancedmd-gateway
+    - docs/CONNECTOR_DECISIONS.md -> docs/GATEWAY_DECISIONS.md;
+      .workflow/build-connector.js -> build-gateway.js; this plan file
+    - Prose across SPEC.md, README.md, CLAUDE.md, docs/, plugin
+      manifests
+
+  NOT done -- OPERATOR ACTIONS, tracked in the rename decision's
+  "Operator follow-ups" list:
+    1. Local workspace folder is STILL /Users/aaron_7nh0yzm/
+       advancedmd-connector. Every path in this plan reads
+       advancedmd-connector for that reason (see -1.2).
+    2. GitHub remote is STILL
+       git@github.com:orlando-derm/advancedmd-connector.git. The repo
+       rename and remote re-point are the operator's.
+    3. Coolify project/app must be created as advancedmd-gateway in R1
+       so the old name never reaches black-sky.
+
+  DELIBERATELY NOT RENAMED -- published contracts, not product naming.
+  A future reader must not "finish the rename" here without its own
+  decision file:
+    - The thirteen connector_* Prometheus metric names (SPEC 18.1
+      table) and the instance_id="connector" label default. R1 step 6,
+      R3 step 1, and H-4 in R5 therefore all cite connector_* series on
+      purpose; those are correct as written.
+    - ConnectorError / ConnectorTimeout (the SPEC 14 exception surface,
+      imported by domains/*/handlers/_common.py).
+    - Error code connector_timeout, message "unexpected connector
+      error", and _JSONRPC_BY_CONNECTOR_CODE -- wire values in the SPEC
+      14 table. Changing them is an API break, not a rename.
+  Consequence, accepted: /metrics emits connector_* from a service
+  named gateway. Cosmetically odd, deliberate.
+
+-1.2 PATH CORRECTION THROUGHOUT THIS PLAN
+
+Every occurrence of /Users/aaron_7nh0yzm/advancedmd-gateway in this
+file has been corrected to /Users/aaron_7nh0yzm/advancedmd-connector,
+because that is where the repo is until follow-up 1 above happens. The
+subagent briefs in R0 and R1 were the affected spots. If the operator
+renames the folder, re-point these paths in the same change.
+
+The sibling consumer plan path is unaffected and still correct:
+/Users/aaron_7nh0yzm/orlando-derm-backend/lifecycle/pending/plans/
+ADVANCEDMD_GATEWAY_MIGRATION_PLAN.txt
+
+-1.3 R4 SPLITS: R4a (OFFLINE) AND R4b (GATE + LIVE)
+
+As written, PHASE R4's ENTRY made the whole phase wait on G4. That is
+wrong for the code half. Writing the getehrnotes producer, its two test
+files, the ledger re-freeze and D27 needs no credential, no live check,
+and no AMD contact -- it needs a fixture that already exists. Only the
+compliance verdict and any live exercise of the raw path need G4.
+
+  R4a  CODE + OFFLINE TESTS. ENTRY: G1 only. Agent-executable now.
+       Scope: PHASE R4 steps 1-7 (the handler, tests/integration/
+       test_getehrnotes_raw_xml.py, tests/invariants/
+       test_raw_xml_producer_gated.py, the TOOL_TO_XML_MAP ledger
+       re-freeze, CLAUDE.md, D27, docs/API.md). All seven R4.3 design
+       rules apply unchanged -- they are the review criteria and they
+       are checkable offline. Acceptance: G6 items (a) through (f) and
+       (h), which are all offline-provable against
+       tests/fixtures/getehrnotes.reply.xml.
+  R4b  COMPLIANCE GATE + LIVE EXERCISE. ENTRY: G4 AND R4a complete.
+       Scope: PHASE R4 step 8 (the compliance packet graded by
+       annoying-compliance-officer as its own Agent call, inline-
+       personation FORBIDDEN) and any operator re-check of getehrnotes
+       with the raw path exercised. Acceptance: G6 item (g).
+
+  G6 is only satisfied when R4a and R4b both pass. R4a shipping alone
+  does NOT unblock the consumer plan's PHASE 5: without the compliance
+  APPROVE, note-audit's raw_xml path stays held. The producer may sit
+  in main un-approved and unentitled, which is safe -- note-audit's
+  token is not issued until R1 and can be issued without --raw-xml.
+
+  Q-6 still governs R4a's entry in practice: if
+  tests/fixtures/getehrnotes.reply.xml does not carry at least two
+  patientnote rows with different dates, R4a stops and asks the
+  operator for a fixture (SPEC 23.3 step 4). Verify that BEFORE
+  dispatching R4a.
+
+-1.4 AGENT-EXECUTABLE OFFLINE vs OPERATOR-ONLY
+
+  phase  who              why
+  -----  ---------------  ---------------------------------------------
+  R0     AGENT            No credential, no network. EXECUTED - see
+                          -1.5. Operator pushes if the agent lacks
+                          remote rights.
+  R1.0   AGENT            Compliance review of existing code and docs.
+                          Own Agent call, opus, annoying-compliance-
+                          officer. Pre-credential by design.
+  R1     OPERATOR-ONLY    Creating the Coolify service, entering env,
+         (agent drafts)   deploying, confirming the publish, issuing
+                          tokens in the container, the SIGHUP drill,
+                          the 24 h watch. The AGENT may only write
+                          docs/DEPLOY_RUNBOOK.md, scripts/
+                          health_watch.sh, the compliance packet, and
+                          the sibling PORTS.md row.
+  R2     OPERATOR-ONLY    Every AMD call, every fixture recording, the
+         (agent drafts    by-hand scrub review on the box, the two
+          + post-pass)    /v1/login checks. The AGENT may write the
+                          worksheets and the LIVE_CHECK_LOG skeleton
+                          before, and apply the operator's returned
+                          dates to gateway/verification.py after.
+  R3     OPERATOR-ONLY    Running the load on black-sky against the
+         (agent drafts    real office key, and the mid-load restart.
+          + analysis)     The AGENT writes scripts/fairness_on_box.py
+                          and grades the collected numbers.
+  R4a    AGENT            Offline code + tests. See -1.3.
+  R4b    OPERATOR/GATE    Compliance verdict is its own Agent call and
+                          may never be inline-personated; a live
+                          re-check, if the verdict asks for one, is the
+                          operator's.
+  R5     OPERATOR SIGNS   The agent drafts and adversarially verifies
+                          the twelve H-lines; the SIGNATURE is the
+                          gate, because only the operator ran the live
+                          checks.
+
+  Standing rule, unchanged from PART TWO's preamble: NO AGENT MAY
+  contact AdvancedMD, run scripts/record_fixture.py, place or read a
+  credential, run a live check, or write a fixture.
+
+-1.5 WHAT HAS BEEN EXECUTED
+
+  R0   EXECUTED 2026-08-25. .gitignore carries the three run-artifact
+       files (runtime/ was already ignored); D24/D25/D26 recorded in
+       docs/GATEWAY_DECISIONS.md; suite 886 passed (unit 378,
+       invariants 358, integration 146, load 4) matching the baseline
+       exactly; both CI greps clean; the audit fixes and the in-tree
+       rename committed together. Evidence:
+       runtime/audits/gateway-hardening/R0.md (gitignored).
+       G1 items (a), (b-local), (d) met. G1 (c) -- CI green on the
+       pushed SHA -- is PENDING THE OPERATOR PUSH, because the remote
+       is still named advancedmd-connector and the agent did not push.
+       R1 must not start until the operator pushes and CI is green.
+  R1.0 NOT STARTED.
+  R1   NOT STARTED. Nothing has ever been deployed; no credential
+       exists anywhere in this repo or on the laptop.
+  R2   NOT STARTED. All nine Appendix A rows still read PENDING
+       OPERATOR and LIVE_CHECK_PENDING is still True.
+  R3   NOT STARTED.
+  R4a  NOT STARTED but UNBLOCKED by G1 -- this is the correction in
+       -1.3. It is the largest remaining piece of agent work and it
+       does not need the operator.
+  R4b  NOT STARTED, blocked on G4.
+  R5   NOT STARTED.
+
+  R0 did NOT touch domains/amd_ehr_mcp/handlers/getehrnotes.py. The
+  raw_xml producer remains absent; that is R4a's job, deliberately not
+  smuggled into the stabilization commit.
+
+
+---------------------------------------------------------------------
+SECTION 0. CONTEXT AND GOALS
+---------------------------------------------------------------------
+
+0.1 Problem statement
+
+886 tests pass offline in 5.2 s and CI never contacts AdvancedMD by
+construction. None of that is evidence the gateway works, because the
+one thing no test here can do is talk to AdvancedMD. Today:
+
+- gateway/verification.py sets LIVE_CHECK_PENDING = True and all nine
+  Appendix A rows carry live_check = "PENDING OPERATOR". Per SPEC 9.3
+  that means ZERO tools are verified and every call returns
+  tool_unverified in a production posture.
+- The audit fixes are uncommitted on the laptop: 18 modified files and 8
+  untracked paths, including the PHI redaction key file that CLAUDE.md
+  now declares load-bearing.
+- The service has never run on black-sky. No /health has been served
+  with real credentials, no token issued, no SIGHUP revoke executed
+  against a live container.
+- raw_xml exists as a token flag, a worker strip gate, an invariant
+  test, and a documented SDK promise (SPEC 13.3) -- with ZERO producers.
+  domains/amd_ehr_mcp/handlers/getehrnotes.py returns
+  {patient_id, count} and its docstring says "Count only, no raw."
+
+0.2 Success criteria (measurable)
+
+SC-1  Clean tree on main; suite green from a FRESH CLONE; CI green on
+      the pushed SHA.
+SC-2  GET /health on black-sky :8820 answered status ok (not degraded,
+      not starting) for 24 h continuous, sampled <= 5 min apart, with
+      serving_pending_verification false.
+SC-3  All nine Appendix A rows carry a real live_check date,
+      LIVE_CHECK_PENDING is False, GET /v1/tools reports verified true
+      with no pending checklist item.
+SC-4  Fairness reproduced on the box against real AMD pacing: no tier
+      over cap, no batch record past BATCH_AGING_MS unpromoted,
+      interactive p95 under 10 s measured DURING the batch.
+SC-5  result["raw_xml"] produced by getehrnotes, delivered only to a
+      phi+raw_xml token, compliance APPROVE recorded.
+SC-6  SPEC 17.6 compliance review of 17.1-17.5 plus the audit and log
+      tests returned APPROVE BEFORE real credentials reached the box.
+SC-7  R5's handoff checklist signed and the consumer plan's PHASE 0
+      entry conditions met item by item.
+
+0.3 Non-goals
+
+- No consumer edits. Not one file in orlando-derm-backend, except the
+  docs/PORTS.md row INV-PORTS requires (R1 step 7).
+- No second replica, ever (SPEC 4.6, 4.7): a second replica is a second
+  clock and AMD bills per excess call across the office key.
+- No per-user AMD sessions. Permanent NO -- see SECTION 5.2.
+- No tool promotion beyond Appendix A (SPEC 25). No /v2 normalization.
+- No fixture recorded by an agent (SPEC 23.3 step 4).
+- No TLS inside the tailnet (SPEC 17.4 accepted risk, D19).
+
+0.4 Assumptions (correct them before build if wrong)
+
+B-1  black-sky reachable as `ssh black-sky` (aaron@100.94.62.115 via
+     Tailscale); Coolify on :8100.
+B-2  AMD credentials for existing services are already on Coolify on
+     black-sky. There is NO .env on the laptop and none will be created;
+     the operator enters values into the Coolify service directly.
+B-3  Host port 8820 is free on black-sky. VERIFY in R1 step 1.
+B-4  The gateway uses the SAME office key as the legacy consumers, so
+     one AMD bucket is contended by the gateway plus fifteen legacy
+     processes for the whole migration window. R3's numbers must be read
+     with that in mind.
+B-5  scripts/record_fixture.py runs on black-sky with the gateway's
+     credentials. Operator-only.
+B-6  tests/fixtures/getehrnotes.reply.xml exists and is synthetic, so
+     R4 needs no new recording (but see Q-6).
+
+0.5 Provenance
+
+Current state was read 2026-08-25 from SPEC.md (9, 10, 17, 21, 22, 23,
+Appendix A/C/D), CLAUDE.md, docs/OPERATIONS.md,
+docs/GATEWAY_DECISIONS.md D1..D23, gateway/{verification, worker,
+tokens, receiver, registry, app, client_shim, sender}.py,
+domains/amd_ehr_mcp/handlers/getehrnotes.py, docker-compose.yml,
+.env.example, .github/workflows/ci.yml, TESTS_LAST_RUN.txt (886 passed:
+unit 378, invariants 358, integration 146, load 4), and git (HEAD
+c08ac20 on main).
+
+
+---------------------------------------------------------------------
+SECTION 1. OWNERSHIP BOUNDARY vs THE CONSUMER PLAN
+---------------------------------------------------------------------
+
+1.1 The other plan -- READ IT, NEVER EDIT IT
+
+  /Users/aaron_7nh0yzm/orlando-derm-backend/lifecycle/pending/plans/
+      ADVANCEDMD_GATEWAY_MIGRATION_PLAN.txt
+
+A peer document: different repo, different owner, its own phase
+namespace (PHASE C, PHASE 0..7). This plan uses R0..R5 so the two never
+collide in an executor's dispatch log. Report findings about it here;
+do not rewrite it.
+
+1.2 Who owns what
+
+  THIS PLAN: commit/verify the audit baseline (R0); the Coolify service,
+  env, volume, host port, PORTS.md row, token issuance, SIGHUP drill,
+  and the SPEC 17.6 compliance review (R1); all nine SPEC 9.3 step 2
+  live checks, the verification.py dates and ledger lines, and turning
+  GATEWAY_SERVE_PENDING_VERIFICATION off (R2); fairness on the box
+  (R3); the raw_xml producer mechanism plus its compliance gate (R4);
+  the handoff (R5).
+
+  CONSUMER PLAN: result-shape gaps GAP-1..20 (appointment_type,
+  insurance carcode, datechanged/servertime, lookuppatient
+  limit/exactmatch, gettxhistory and getchargedetaildata row
+  projections, getehrnotes templateid) -- its PHASE C. Plus
+  lib/advancedmd_gateway, the AMD_TRANSPORT seams, every per-service
+  cutover, golden-corpus parity, and the allowlist shrink -- its
+  PHASE 0..7.
+
+1.3 The one overlap, split explicitly
+
+The consumer plan's C4 lists GAP-16 (getehrnotes raw_xml) beside
+GAP-17/18/19. R4 here takes GAP-16 and ONLY GAP-16, because it is not a
+field addition -- it is the first producer of an unredactable PHI path.
+
+  R4 (here)  the raw-XML capture mechanism, the getehrnotes
+             result["raw_xml"] key, the token-gate proof, the invariants
+             that stop the key leaking, the ledger re-freeze, and the
+             compliance APPROVE.
+  C4 (there) GAP-17 templateid passthrough, GAP-18 gettxhistory row
+             projection {id, visit, void}, GAP-19 getchargedetaildata
+             proccode/diagcode rows -- all riding on R4's mechanism.
+
+If C4 ships a producer first, R4 becomes a REVIEW of it against R4.3's
+design rules, not a second implementation. The compliance gate is
+required either way and may never be inline-personated.
+
+1.4 R2-SEQ -- the sequencing correction (report, do not edit)
+
+The consumer plan's A-5 says its PHASE 0 waits until the gateway is
+verified and /health has been ok for 24 h. Correct -- and THIS plan is
+what makes it true. But its PHASE C states its own prerequisite as
+"step 0 gate already met", which creates a hazard:
+
+  Four Appendix A tools change their AMD REQUEST WIRE SHAPE in PHASE C:
+    getreminderappts   caller-supplied apptstatus     GAP-5
+    getupdatedvisits   datechanged= not since=        GAP-9
+    lookuppatient      limit / exactmatch             GAP-13/14
+    getehrnotes        templateid passthrough         GAP-17
+  A SPEC 9.3 step 2 live check attests to a REQUEST. Checking those four
+  before PHASE C lands records a date for a request the code no longer
+  sends -- a FALSE verification, plus a second operator AMD session.
+
+  RESOLUTION: R2 splits. R2a checks the five tools PHASE C does not
+  touch (getdemographic, getdatevisits, uploadfile, gettxhistory,
+  getchargedetaildata -- GAP-18/19 change the RESULT projection, not the
+  request). R2b checks the four wire-shape tools AFTER PHASE C merges.
+  If the operator prefers one early session, R2b MUST be re-run after
+  PHASE C and that choice recorded in docs/GATEWAY_DECISIONS.md so
+  nobody reads the first date as still valid.
+
+
+---------------------------------------------------------------------
+SECTION 2. CURRENT STATE INVENTORY (read 2026-08-25)
+---------------------------------------------------------------------
+
+2.1 Git -- main, HEAD c08ac20
+
+  Modified (18): CLAUDE.md, gateway/{app, lifecycle, mcp_surface,
+    queues, receiver, registry, tokens, worker}.py,
+    docs/{GATEWAY_DECISIONS, OPERATIONS}.md,
+    domains/amd_mcp_common/redact.py, tests/conftest.py,
+    tests/integration/{test_api, test_mcp_surface}.py,
+    tests/unit/{test_scaffold, test_sender, test_tokens}.py
+
+  Untracked, MUST commit (5): knowledge/policies/
+    phi-redaction-fields.data.json, tests/integration/
+    test_token_revocation.py, tests/invariants/
+    test_phi_redaction_holes.py, tests/invariants/
+    test_raw_xml_requires_phi.py, uv.lock
+
+  Untracked, MUST NOT commit (3): TESTS_LAST_RUN.txt,
+    TESTS_LAST_RUN.verbose.txt, tests-last-run.txt -- local run
+    artifacts; they go in .gitignore, not into history.
+
+2.2 What the uncommitted audit changed
+
+  (a) MCP input_schema compat -- gateway/registry.py::_tool_schema
+      reads input_schema (mcp 2.x) then inputSchema (mcp 1.x).
+  (b) get_running_loop -- gateway/lifecycle.py installs the SIGHUP
+      handler BEFORE looking up the running loop, so token reload
+      survives platforms where loop-signal registration fails.
+  (c) PHI policy externalized -- knowledge/policies/
+      phi-redaction-fields.data.json is the key set, mirrored by
+      _FALLBACK_PHI_KEYS in domains/amd_mcp_common/redact.py. A loaded
+      file REPLACES the fallback, so it must stay a SUPERSET of it.
+      Load-bearing and currently untracked: the most dangerous item in
+      the tree.
+  (d) raw_xml gate -- gateway/worker.py adds RAW_XML_KEYS,
+      strip_raw_xml(), _may_receive_raw_xml() requiring phi AND raw_xml,
+      and the `<key>_hash` sidecar strip.
+  (e) Token reload + SIGHUP -- TokenTable.reload_due() (I/O-free
+      predicate) plus asyncio.to_thread reloads on both auth paths
+      (Receiver.authenticate, _Surface.authenticate); app.py's
+      malformed-body path now authenticates first so a revoked token
+      gets 401 not 400. Already documented as D23 in the uncommitted
+      diff, with the SIGHUP one-liner in docs/OPERATIONS.md.
+  (f) MCP _IncludedRouter -- tests/integration/test_mcp_surface.py walks
+      the original router because an included router has no .path.
+
+  DECISION DEBT: (a), (c), (d) have code and tests but NO entry in
+  docs/GATEWAY_DECISIONS.md. R0 closes that as D24/D25/D26.
+
+2.3 Verification state and the Appendix A launch set
+
+  gateway/verification.py: nine rows, LIVE_CHECK_PENDING True, every
+  live_check PENDING_OPERATOR. is_verified() needs all five SPEC 9.3
+  items, so nothing is verified; is_served() is the same unless
+  GATEWAY_SERVE_PENDING_VERIFICATION is true.
+
+  canonical name                      alias                tier  note
+  ----------------------------------  -------------------  ----  -----------------
+  amd_patients_get_demographic        getdemographic          2
+  amd_patients_get_reminder_appts     getreminderappts        2
+  amd_visits_get_date_visits          getdatevisits           2
+  amd_visits_get_updated_visits       getupdatedvisits        1  Appendix C-4
+  amd_patients_lookup_patient         lookuppatient           3
+  amd_patients_uploadfile             uploadfile              2  WRITE, 1024 KB
+  amd_ehr_getehrnotes                 getehrnotes             2  the raw_xml tool
+  amd_payments_get_tx_history         gettxhistory            2
+  amd_billing_get_charge_detail_data  getchargedetaildata     2
+  plus "login (internal)" -- NOT a registry tool (Amendment D-4); it is
+  session.login plus POST /v1/login, on the login bucket.
+
+2.4 raw_xml: gate present, producer absent
+
+  PRESENT: Caller.raw_xml (gateway/interfaces.py:178); worker
+  RAW_XML_KEYS / strip_raw_xml / _may_receive_raw_xml;
+  tests/invariants/test_raw_xml_requires_phi.py (11 tests, using a FAKE
+  handler because no real one emits the key); `--raw-xml` in the tokens
+  CLI and OPERATIONS.md; "raw_xml" listed as PHI in the redaction key
+  set; SPEC 13.3's promise that note-audit's fetch_note_raw reads
+  result["raw_xml"].
+  ABSENT: any handler that produces it.
+
+  MECHANISM NOTE for R4: gateway/sender.py::send() returns a PARSED
+  lxml element, not bytes. The reference consumer does not need AMD's
+  literal body -- note-audit's fetch_note_raw builds a FRESH
+  <PPMDResults> wrapper around the matched <patientnote> and returns
+  etree.tostring of it. Byte-fidelity to the wire is NOT a requirement,
+  so R4 needs no sender change and no retained response body anywhere.
+
+2.5 Deployment state
+
+  docker-compose.yml publishes "100.94.62.115:8820:8820" -- never a bare
+  8820:8820 (tests/invariants/test_no_public_port_binding.py plus a CI
+  grep enforce it), one replica, /data volume, healthcheck curling
+  /health for ok|degraded|starting, stop_grace_period 45s. Nothing has
+  ever been deployed; no token table and no clock.json exist.
+
+
+---------------------------------------------------------------------
+SECTION 3. HARD GATES
+---------------------------------------------------------------------
+
+  gate  from  statement                                        blocks
+  ----  ----  -----------------------------------------------  -------------------
+  G1    R0    Clean tree, fresh-clone suite green, CI green,   R1
+              D24/D25/D26 recorded.
+  G2    R1    SPEC 17.6 compliance APPROVE on 17.1-17.5 plus   credentials on box
+              audit/log tests, BEFORE credentials exist.
+  G3    R1    /health ok 24 h continuous, samples <= 5 min     R2
+              apart, no public port, tokens issued, SIGHUP
+              revoke drilled.
+  G4    R2    Nine live_check dates; LIVE_CHECK_PENDING False; consumer PHASE 0
+              SERVE_PENDING false; /v1/tools verified true.
+  G5    R3    Fairness holds on the box; login bucket          consumer PHASE 3/4/5
+              respected across a restart.
+  G6    R4    raw_xml produced by getehrnotes, delivered only  consumer PHASE 5
+              to phi+raw_xml, compliance APPROVE.
+  G7    R5    Handoff checklist signed.                        consumer PHASE 0
+
+  MAPPING: consumer PHASE 0 / SPEC 22 step 0 needs G1+G2+G3+G4+G5+G7.
+  consumer PHASE 5 additionally needs G6. consumer PHASE C may start its
+  offline work any time (it is code in this repo, no AMD contact), but
+  see R2-SEQ for the ordering that saves an operator session.
+
+
+---------------------------------------------------------------------
+SECTION 4. AFFECTED SURFACE AREA
+---------------------------------------------------------------------
+
+  CREATE  docs/DEPLOY_RUNBOOK.md (R1), docs/LIVE_CHECK_LOG.md (R2),
+          scripts/health_watch.sh (R1), scripts/fairness_on_box.py (R3),
+          tests/integration/test_getehrnotes_raw_xml.py (R4),
+          tests/invariants/test_raw_xml_producer_gated.py (R4),
+          runtime/audits/gateway-hardening/R{0..5}.md (gitignored)
+
+  MODIFY  .gitignore (R0); docs/GATEWAY_DECISIONS.md (R0: D24/D25/D26;
+          R4: D27); docs/OPERATIONS.md (R1 deploy reality, R2 log
+          pointer); docs/TOOL_TO_XML_MAP.md (R2 nine live-check lines;
+          R4 getehrnotes result-shape re-freeze);
+          gateway/verification.py (R2 dates + LIVE_CHECK_PENDING);
+          domains/amd_ehr_mcp/handlers/getehrnotes.py (R4); docs/API.md
+          and CLAUDE.md (R4 if the surface or invariant text moves).
+          SPEC.md only if a gate proves SPEC wrong, as its own decision.
+
+  CROSS-REPO, DOCS ONLY (INV-PORTS): add 8820 to
+  /Users/aaron_7nh0yzm/orlando-derm-backend/docs/PORTS.md -- black-sky,
+  tailnet address only, no Funnel. The one file this plan touches
+  outside the repo. Not a consumer code change.
+
+  No database, no migration, no new dependency. New env lives only in
+  the Coolify service, per SPEC 19 (AMD_USERNAME, AMD_PASSWORD,
+  AMD_OFFICE_KEY, AMD_APP_NAME, GATEWAY_TOKENS_PATH=/data/tokens.json,
+  CLOCK_STATE_PATH=/data/clock.json, GATEWAY_PORT=8820,
+  GATEWAY_BIND=0.0.0.0 container-internal, CLOCK_MARGIN=0.90,
+  EXECUTION_ALLOWANCE_MS, BATCH_AGING_MS, AMD_POST_TIMEOUT_S,
+  LOGIN_CHECK_CACHE_S, ENTRY_QUEUE_CAP, SHUTDOWN_DRAIN_S, LOG_LEVEL=INFO,
+  WRITE_TOOLS_ENABLED=false, GATEWAY_SERVE_PENDING_VERIFICATION true
+  only during R1/R2 exercise and false from G4 onward).
+
+
+=====================================================================
+PART TWO: THE PHASES
+=====================================================================
+
+NO AGENT MAY: contact AdvancedMD, run scripts/record_fixture.py, place
+or read a credential, run a live check, or write a fixture. Those are
+operator actions (SPEC 23.3, 23.4, docs/OPERATIONS.md). An agent that
+needs one STOPS and reports.
+
+
+---------------------------------------------------------------------
+PHASE R0. STABILIZE THE AUDIT BASELINE
+---------------------------------------------------------------------
+
+OBJECTIVE  Get the audit fixes out of the working tree and into main
+with the three missing decision records, so every later phase reasons
+about a commit rather than somebody's laptop.
+
+ENTRY  None. R0 is the root of the DAG.
+
+AGENT vs OPERATOR  Agent does all of R0 (no credentials, no network).
+Operator reviews the commit and pushes if the agent lacks rights.
+
+FILES AND COMMANDS
+
+1. Append to .gitignore: TESTS_LAST_RUN.txt, TESTS_LAST_RUN.verbose.txt,
+   tests-last-run.txt, runtime/. Confirm `git status --porcelain` no
+   longer lists them.
+
+2. Write D24/D25/D26 in docs/GATEWAY_DECISIONS.md (D23 is already in
+   the uncommitted diff), house format context/decision/alternatives/
+   consequences:
+
+   D24 MCP tool schema read under both spellings. mcp 2.x renamed the
+       field to input_schema and kept inputSchema as the wire alias; mcp
+       1.x has only inputSchema. The copied domain packages construct
+       Tools with the alias, which both versions accept, so only the READ
+       needs to tolerate both -- hence registry._tool_schema rather than
+       pinning mcp or rewriting nine packages. Consequence: a Tool with
+       neither field yields {"type": "object"} and args validation
+       becomes a no-op for it, which is deliberately permissive because a
+       schemaless tool is a registry bug (caught by
+       tests/unit/test_registry.py), not a caller-facing gate.
+
+   D25 The PHI redaction key set is a knowledge file and a loaded file
+       REPLACES the fallback. knowledge/policies/
+       phi-redaction-fields.data.json is the key set;
+       redact._FALLBACK_PHI_KEYS mirrors it for absence. Replacement not
+       merge, so the file is auditable as THE answer -- a merge means no
+       reader can tell what is enforced without also reading the code.
+       The cost is the standing obligation that the file stay a SUPERSET
+       of the fallback, asserted by
+       tests/invariants/test_phi_redaction_holes.py. Record the
+       fail-closed spellings: query (a lookup's search echo IS a name),
+       id, chart, memo, zipcode, _text nodes, raw_xml. Consequence: a
+       non-PHI caller sees <REDACTED> for a code lookup's echo and a
+       masterfile row's internal id; callers needing those carry phi=true.
+
+   D26 raw_xml is a second permission on top of phi, never a substitute.
+       The raw string is a whole AMD body and is unredactable, so
+       worker.strip_raw_xml removes every raw-XML key (and the
+       `<key>_hash` sidecar the Redactor leaves) unless the caller has
+       BOTH flags, and OMITS rather than blanks so a caller cannot
+       distinguish "stripped" from "never produced". An unresolvable
+       caller gets neither flag. Consequence: a --raw-xml token without
+       --phi gets nothing, which is the intended trap; and the gate is
+       live and tested before any producer exists, which is the right
+       order (see R4).
+
+3. Run and record the tallies (do NOT commit the tally files):
+     python -m pytest tests -q
+     python -m pytest tests/invariants -q
+     python -m pytest tests/load -q
+   Baseline to beat: 886 passed (unit 378, invariants 358, integration
+   146, load 4).
+
+4. Mirror the CI greps locally so the push cannot fail on something
+   trivial:
+     grep -nE '^[[:space:]]*-[[:space:]]*"?[0-9]+:[0-9]+"?[[:space:]]*$' docker-compose.yml   # must be EMPTY
+     git ls-files --error-unmatch .env    # must FAIL
+
+5. One commit (or a clean short series) naming the six audit fixes and
+   the three new decision records. No emoji, no credential, no PHI, no
+   patient identifier -- in the message or in any file.
+
+6. Push; confirm the `ci` workflow is green on the SHA, including the
+   standalone tests/invariants step.
+
+ACCEPTANCE GATE (G1) -- all four
+(a) `git status --porcelain` prints nothing.
+(b) Fresh clone + `pip install -e ".[dev]"` + `python -m pytest tests -q`
+    reports >= 886 passed, 0 failed, 0 errors, 0 skipped.
+(c) CI green on the pushed SHA; a skip in the invariants step is a fail.
+(d) `grep -c "^## D2[456]" docs/GATEWAY_DECISIONS.md` == 3.
+
+ROLLBACK  Nothing deployed, no credential exists. `git revert`, or
+`git reset --hard` before the push. The evidence file's fix-by-fix
+summary is the recovery path if the stash is lost.
+
+BLOCK RULE  BLOCK if the fresh-clone suite is not green. Do not xfail,
+do not skip, do not delete a failing invariant -- a failing invariant is
+the invariant working (CLAUDE.md). BLOCK if
+knowledge/policies/phi-redaction-fields.data.json is not a SUPERSET of
+_FALLBACK_PHI_KEYS: a loaded file replaces the fallback, so a subset
+file silently OPENS a PHI hole. Highest-severity failure mode in R0.
+
+RISKS  Artifacts committed by `git add -A` -> gitignore first, verify
+with `git show --stat HEAD`. uv.lock churn across interpreters -> commit
+the lock from the machine that produced the green run and note the
+interpreter. Decision records drifting from code -> each D names the
+exact symbol (registry._tool_schema, redact._FALLBACK_PHI_KEYS,
+worker.strip_raw_xml).
+
+SUBAGENT ORCHESTRATION
+  Execution shape: [SINGLE]
+  REQUIRED subagent_type: general-purpose
+  REQUIRED model: sonnet (mechanical commit plus three prose records
+                  over code already written and tested)
+  Run in background: no (R1 needs the verdict)
+  Brief: "Execute PHASE R0 of <PLAN_FILE_PATH>. Work in
+   /Users/aaron_7nh0yzm/advancedmd-connector ONLY. Read PHASE R0 and the
+   CLAUDE.md invariant list first. Touch only .gitignore,
+   docs/GATEWAY_DECISIONS.md, and the git index -- not gateway/,
+   domains/, tests/, or SPEC.md. Do not contact AdvancedMD; do not
+   create a .env. Validation: clean `git status --porcelain`,
+   fresh-clone suite >= 886 passed, three new D-records.
+   Evidence: runtime/audits/gateway-hardening/R0.md.
+   Print one-line summary and exit."
+
+
+---------------------------------------------------------------------
+PHASE R1. DARK DEPLOY ON BLACK-SKY :8820
+---------------------------------------------------------------------
+
+OBJECTIVE  Run the gateway on black-sky with real credentials, serving
+NO consumer, for 24 hours. Issue every launch token. Prove the SIGHUP
+revocation path on a live container. "Dark" = reachable on the tailnet,
+called by nobody but the operator's own curl.
+
+ENTRY  G1 passed, AND the SPEC 17.6 compliance review has APPROVEd.
+SPEC 17.6 says the build "is not deployable until" that review passes,
+so it is an ENTRY condition to deployment, not an exit condition of it.
+That is gate G2 and it runs as R1.0, its own dispatch.
+
+R1.0 THE COMPLIANCE REVIEW (G2) -- BEFORE ANY CREDENTIAL EXISTS
+
+  Packet the agent assembles and does NOT grade:
+  - SPEC 17.1: args/results in memory only, never on disk, never logged,
+    never in an error or metric. Cite gateway/logging_filter.py,
+    gateway/audit.py's key allowlist, gateway/metrics.py labels.
+  - SPEC 17.2: closed audit key set, serializer rejects anything else;
+    cite tests/unit/test_audit.py (57).
+  - SPEC 17.3: no traceback reaches the stream, filter attached to
+    uvicorn's non-propagating handlers, httpx pinned to WARNING; cite
+    tests/unit/test_logging_filter.py (30).
+  - SPEC 17.4: HTTPS to an AdvancedMD host, redirect target validated
+    before credentials are re-posted, non-https AMD_BASE_URL fails
+    startup, no bare host port mapping (two tests plus a CI grep),
+    tailnet-only transport as the D19 accepted risk with its condition.
+  - SPEC 17.5: credentials from the Coolify environment only; tokens
+    sha256-hashed; plaintext shown once; /v1/login forwards credentials
+    to AMD and nowhere else.
+  - D25 key set and D26 raw_xml gate, with the explicit statement that
+    NO producer exists yet and that this review does NOT pre-approve
+    R4's.
+  Reviewer: annoying-compliance-officer as its own Agent call.
+  Inline-personation FORBIDDEN.
+
+AGENT vs OPERATOR
+  AGENT     docs/DEPLOY_RUNBOOK.md, scripts/health_watch.sh, the
+            compliance packet, the token command list with SPEC 10.4
+            policy per caller, the PORTS.md row, the sample parser.
+  OPERATOR  everything touching black-sky or a credential: creating the
+            Coolify service, entering env, deploying, confirming the
+            publish, running `gateway tokens add` in the container,
+            distributing plaintext tokens, the SIGHUP drill, the watch.
+
+FILES AND COMMANDS
+
+1. VERIFY 8820 IS FREE (B-3) before creating the service:
+     ssh black-sky "ss -ltnp | grep -w 8820 || echo '8820 free'"
+   Also confirm orlando-derm-backend/docs/PORTS.md does not claim it.
+
+2. Coolify service `advancedmd-gateway` on black-sky: ONE replica
+   (SPEC 4.7/21 -- never scale); host publish 100.94.62.115:8820 ->
+   container 8820 (tailnet address only; a bare mapping exposes
+   unauthenticated /health and /metrics on every interface, SPEC 17.4);
+   persistent volume /data; healthcheck GET /health healthy on
+   ok|degraded|starting; env per SECTION 4 with
+   GATEWAY_SERVE_PENDING_VERIFICATION=true for R1/R2 exercise and
+   WRITE_TOOLS_ENABLED=false; stop_grace_period 45s so SHUTDOWN_DRAIN_S
+   can drain. Record the service UUID and container name in the runbook.
+
+3. First-boot expectations, written BEFORE booting so success is
+   distinguishable from noise: /health is "starting" until the first
+   login completes, then "ok", or "degraded" if login was refused --
+   degraded STILL SERVES (SPEC 21). Login retry backoff 60 s, 120 s,
+   300 s, then every 300 s. Two restarts inside one minute both need a
+   fresh login and only one login-bucket slot exists per minute, so the
+   second starts degraded and self-heals (SPEC 16.3). Sample these
+   /health fields: status, session.state, session.last_login_at,
+   entry_queue.depth, entry_queue.oldest_wait_ms, request_queue.depth,
+   clock.peak, clock.tiers, registry counts,
+   serving_pending_verification.
+
+4. Issue every launch token (SPEC 10.4) inside the container, one at a
+   time -- plaintext prints ONCE and is unrecoverable:
+     gateway tokens add admin-console         --priority interactive
+     gateway tokens add chatbot               --priority interactive --tools '*'
+     gateway tokens add agent-cursor          --priority interactive --tools '*'
+     gateway tokens add agent-claude-code     --priority interactive --tools '*'
+     gateway tokens add appointment-validator --priority batch --phi --tools getreminderappts,getdemographic,getdatevisits
+     gateway tokens add srt-auths             --priority batch --phi --tools getreminderappts,getdemographic,getupdatedvisits
+     gateway tokens add note-audit            --priority batch --phi --raw-xml --tools getreminderappts,getehrnotes,gettxhistory,getchargedetaildata,getdemographic
+     gateway tokens add patient-intake        --priority batch --phi --may-write uploadfile --tools lookuppatient,getdemographic,uploadfile
+   Then `gateway tokens list` and diff field by field against SPEC
+   10.4. note-audit is the ONLY --raw-xml holder; admin-console gets no
+   --tools because it uses /v1/login only. Store plaintexts where the
+   consumer plan's PHASE 0 will read them (operator secret store /
+   per-consumer Coolify env) -- never in this repo, a log, or a decision
+   file.
+
+5. SIGHUP revocation drill on the live container:
+     a. POST /v1/tools with a throwaway token -> expect non-401
+        (tool_unverified is fine; it proves auth passed)
+     b. gateway tokens revoke <throwaway>
+     c. call again immediately -> may still succeed; the request-path
+        re-read is throttled to 30 s (SPEC 10.1)
+     d. docker kill --signal=HUP advancedmd-gateway
+     e. call again -> MUST be 401
+   Record observed timings in the runbook. This is the only proof D23
+   holds in a container rather than a unit test.
+
+6. 24 h watch. scripts/health_watch.sh polls /health every 60 s (5 min
+   is the gate minimum) and appends one PHI-FREE line per sample: ts,
+   status, session.state, entry_queue.depth, request_queue.depth,
+   clock.peak, per-tier used/limit, serving_pending_verification. Record
+   connector_session_login_refused_total and
+   connector_session_relogins_total from /metrics at start and end.
+
+7. INV-PORTS: add the 8820 row to
+   /Users/aaron_7nh0yzm/orlando-derm-backend/docs/PORTS.md. Docs only.
+
+ACCEPTANCE GATE (G2 + G3)
+(a) Compliance verdict APPROVE or APPROVE-WITH-CONDITIONS, conditions
+    closed and cited, RECORDED BEFORE STEP 2.
+(b) >= 288 samples over >= 24 h; the last 24 h contain zero "starting"
+    and zero non-"ok" samples, except samples explained by an
+    operator-initiated restart, which are annotated and excused provided
+    the run returns to ok within one login backoff.
+(c) connector_session_login_refused_total did not increase.
+(d) `ss -ltnp` shows 8820 bound to 100.94.62.115 only, NOT 0.0.0.0; a
+    curl to the LAN address for /health fails.
+(e) `gateway tokens list` matches SPEC 10.4 exactly: eight callers,
+    correct priorities, --phi on the five batch callers, exactly one
+    --raw-xml holder (note-audit), exactly one --may-write
+    (patient-intake / uploadfile).
+(f) Drill step (e) returned 401.
+(g) The sibling docs/PORTS.md lists 8820.
+
+ROLLBACK  Stop the Coolify service; nothing depends on it. Clock state
+persists in /data/clock.json (D20/D21, SPEC 7.5, 16.3); the session does
+not, so a restart costs one login-bucket slot. If the deploy is
+abandoned, remove the service and delete /data so the next attempt
+starts from a conservative clock rather than a stale window.
+
+BLOCK RULE  BLOCK and do not deploy on a compliance BLOCK, or if the
+review was not obtained -- deploying credentials before SPEC 17.6 is a
+spec violation, not an ordering preference. BLOCK if 8820 is bound on
+0.0.0.0 or the LAN address: /health and /metrics are unauthenticated by
+design and only safe because the tailnet is the only route (D19); a
+wrong publish turns an accepted risk into an open one. BLOCK if login
+refusals climb through the window -- that is AMD refusing the
+gateway's login and no consumer migration fixes it.
+
+RISKS  Two restarts inside a minute -> degraded start; expected, annotate
+and let the backoff heal. The login bucket is SHARED with fifteen legacy
+processes (B-4), so a refusal may be contention, not a gateway bug --
+record what else restarted. A force rebuild during a legacy batch window
+drops the session for legacy services too via the shared bucket; deploy
+outside the windows in docs/OPERATIONS.md. A plaintext token scrolling
+out of the terminal is unrecoverable by design -- issue one at a time
+and store each before the next.
+
+SUBAGENT ORCHESTRATION
+  Execution shape: [SEQUENTIAL -- depends on R0]; R1.0 is its own
+                   [SINGLE] dispatch gating the rest.
+  REQUIRED subagent_type: annoying-compliance-officer for R1.0 (own
+                   Agent call, inline-personation FORBIDDEN);
+                   general-purpose for the runbook/script/packet.
+  REQUIRED model: opus for R1.0 (a PHI-posture verdict over five spec
+                  sections); sonnet for the runbook and script.
+  Run in background: yes for drafting; no for R1.0.
+  Brief (documentation slice): "Execute PHASE R1 documentation slice of
+   <PLAN_FILE_PATH>. Read PHASE R1 and docs/OPERATIONS.md (Deploy,
+   Rollback, Batch schedule) first. Produce docs/DEPLOY_RUNBOOK.md and
+   scripts/health_watch.sh, and add the 8820 row to
+   /Users/aaron_7nh0yzm/orlando-derm-backend/docs/PORTS.md. You may NOT
+   ssh to black-sky, deploy, read or write a credential, or run a token
+   command -- write every operator step for the operator, copy-pasteable.
+   Validation: the runbook carries the exact SPEC 19 env list, the
+   drill's five steps, and the 24 h sampling procedure.
+   Evidence: runtime/audits/gateway-hardening/R1.md.
+   Print one-line summary and exit."
+
+
+---------------------------------------------------------------------
+PHASE R2. OPERATOR LIVE VERIFICATION (SPEC 9.3 STEP 2)
+---------------------------------------------------------------------
+
+OBJECTIVE  Turn all nine Appendix A rows from PENDING OPERATOR into
+recorded dates, then turn GATEWAY_SERVE_PENDING_VERIFICATION off so
+the gateway serves verified tools in a production posture.
+
+ENTRY  G3 passed, AND R2-SEQ (SECTION 1.4) is decided.
+
+SPLIT  R2a = getdemographic, getdatevisits, uploadfile, gettxhistory,
+getchargedetaildata (request shape untouched by PHASE C). R2b =
+getreminderappts, getupdatedvisits, lookuppatient, getehrnotes (request
+shape changed by PHASE C -- check AFTER those land). POST /v1/login sits
+in either session.
+
+AGENT vs OPERATOR
+  AGENT     the per-tool worksheet (action, class, exact attribute set,
+            the fixture the reply is compared to, the ledger anchor, the
+            expected tier); the docs/LIVE_CHECK_LOG.md skeleton; after
+            the operator returns dates, the verification.py and
+            TOOL_TO_XML_MAP.md edits and the consistency test update.
+  OPERATOR  every AMD call; running scripts/record_fixture.py; reviewing
+            and committing scrubbed fixtures; confirming success="1";
+            the two /v1/login checks.
+
+FILES AND COMMANDS
+
+1. Per tool, follow docs/OPERATIONS.md "Live check procedure" on the box:
+     python scripts/record_fixture.py --action getdemographic \
+       --class demographics --attr patientid=<synthetic-or-consented> \
+       --out tests/fixtures --name getdemographic
+   Use --dry-run FIRST (builds and prints the request, contacts nobody).
+   Do not use --yes on a first run. The script scrubs; the operator
+   REVIEWS THE SCRUBBED FILE BY HAND ON THE BOX, then commits.
+
+2. Confirm success="1". Record ONLY tool, date, AMD call count, success
+   flag -- no bodies, no patient identifier -- in two places:
+   docs/TOOL_TO_XML_MAP.md under `## verification-ledger-<action>`,
+   replacing the `Live check: PENDING OPERATOR` line; and
+   docs/LIVE_CHECK_LOG.md as the chronological record.
+
+3. Set live_check="YYYY-MM-DD" on the row in gateway/verification.py.
+   That row is what the registry reads; the ledger is the record of WHY.
+   When all nine carry dates, set LIVE_CHECK_PENDING = False.
+
+4. POST /v1/login twice (SPEC 23.4): once with a real staff credential
+   (clean positive), once with a deliberately wrong password (refusal
+   envelope; confirm connector_session_login_refused_total moved). Only
+   positives are cached, for LOGIN_CHECK_CACHE_S (D20). Confirm no
+   credential appears in the container log.
+
+5. Restart. Then flip GATEWAY_SERVE_PENDING_VERIFICATION=false in the
+   Coolify env and restart again -- space the two restarts more than a
+   minute apart so the second does not start degraded on the login
+   bucket.
+
+6. Confirm off-box with a token: GET /v1/tools shows the nine as
+   verified true with NO pending checklist value and every other tool
+   still false; GET /health shows status ok and
+   serving_pending_verification false; the audit lines for the nine
+   carry ids and codes only (SPEC 17.2 key set), eyeballed in the log.
+
+ACCEPTANCE GATE (G4)
+(a) `grep -c 'live_check="20' gateway/verification.py` == 9 and
+    LIVE_CHECK_PENDING = False.
+(b) Zero "PENDING OPERATOR" remaining under the nine ledger anchors.
+(c) GET /v1/tools: nine verified true, zero pending checklist values.
+(d) GET /health: status ok, serving_pending_verification false.
+(e) Offline suite still green (>= 886) WITH the dates in place -- in
+    particular tests/integration/test_tools_verified.py, which must now
+    assert the post-verification state. If it still asserts "pending",
+    the test is wrong and gets fixed, not skipped.
+(f) /v1/login succeeded with a real credential and was refused with a
+    wrong one, and neither credential appears in any log line.
+
+ROLLBACK  Revert the dates and restore the prior
+GATEWAY_SERVE_PENDING_VERIFICATION. The gateway returns to refusing
+tool calls, which is the safe state -- tool_unverified costs zero AMD
+calls (SPEC 9.2). Committed reviewed fixtures stay; a synthetic fixture
+is never harmful.
+
+BLOCK RULE  BLOCK the moment any reply does NOT carry success="1". That
+tool is not verified, its row keeps PENDING OPERATOR, and the failure is
+a real finding: the request map in docs/TOOL_TO_XML_MAP.md is wrong for
+it. Fix the map and re-check; never record a date to move on. BLOCK if
+an agent is asked to, or offers to, run a live check or record a fixture
+-- operator-only (SPEC 23.3 step 4, 23.4). BLOCK if a date is written
+for a tool whose request shape is scheduled to change in PHASE C without
+R2-SEQ resolved: a false verification is worse than a pending one.
+
+RISKS
+- Tier pacing. getupdatedvisits is tier 1 (Appendix C-4: handler and
+  policy said 2, AMD says 1, the SPEC 7.4 table overrides) and
+  lookuppatient is tier 3. The operator WILL wait between calls; batch
+  the nine into a planned session and expect real minutes.
+- uploadfile is a WRITE against a real chart. It needs a synthetic or
+  consented patient, WRITE_TOOLS_ENABLED true and a may_write token for
+  the duration, and BOTH turned off immediately after. Highest-risk
+  single action in the plan -- consider deferring it to the consumer
+  plan's PHASE 6, where the gated-upload procedure already exists. If
+  deferred, uploadfile stays unverified and only PHASE 6 waits (Q-2).
+- getdemographic's class is "demographics" (plural) in every reference
+  client and in the ledger; SPEC Appendix A's "demographic" is a
+  transcription slip already recorded as an open item in
+  gateway/client_shim.py. Do not "fix" the code to match the table.
+- A scrubbed fixture still containing something real -> the by-hand
+  review on the box, by the operator, before the file leaves it. No
+  agent substitutes for that step.
+
+SUBAGENT ORCHESTRATION
+  Execution shape: [SEQUENTIAL -- depends on R1]. R2a and R2b are two
+                   operator sessions; the AGENT-side worksheets are
+                   [PARALLEL FANOUT OK -- 2 siblings].
+  REQUIRED subagent_type: general-purpose
+  REQUIRED model: sonnet for worksheets and the log skeleton; opus for
+                  the post-session pass, because it edits
+                  verification.py -- the file that decides what the
+                  gateway actually serves -- and must keep the table,
+                  the ledger, and test_tools_verified.py mutually
+                  consistent in ONE commit.
+  Run in background: yes for worksheets; no for the post-session pass.
+  Brief: "Execute PHASE R2 <a|b|post> of <PLAN_FILE_PATH>. Read PHASE
+   R2, docs/OPERATIONS.md 'Live check procedure', SPEC 9.3, and
+   gateway/verification.py first. For <a|b>: produce the per-tool
+   worksheet only -- you may NOT call AdvancedMD, run
+   scripts/record_fixture.py, or invent a fixture; if one is missing,
+   say so and stop. For <post>: the operator's dates are in
+   docs/LIVE_CHECK_LOG.md -- apply them to gateway/verification.py and
+   the matching docs/TOOL_TO_XML_MAP.md ledger lines, flip
+   LIVE_CHECK_PENDING when all nine are dated, and update
+   tests/integration/test_tools_verified.py.
+   Validation: offline suite green plus the grep counts in G4(a)(b).
+   Evidence: runtime/audits/gateway-hardening/R2.md.
+   Print one-line summary and exit."
+
+
+---------------------------------------------------------------------
+PHASE R3. FAIRNESS AND LOAD ON THE BOX (SPEC 23.5)
+---------------------------------------------------------------------
+
+OBJECTIVE  Reproduce the SPEC 23.5 assertions against the REAL clock,
+session, and AMD latency -- not against tests/load/test_fairness.py's
+VirtualTime and MockTransport -- and confirm the login bucket behaves
+across a restart mid-load.
+
+ENTRY  G4 passed. Tools must genuinely be verified, or the run measures
+only the cost of returning tool_unverified.
+
+WHY THE OFFLINE TEST IS NOT ENOUGH  tests/load/test_fairness.py asserts
+the right shape and passes (4 tests), but it injects VirtualTime for
+monotonic()/sleep() so twenty minutes finish in seconds, and an
+httpx.MockTransport for AdvancedMD. It has therefore never observed a
+real AMD post-time distribution, a real relogin mid-load, clock.json
+written and re-read by a real process under load, or contention with the
+fifteen legacy processes on the same office key (B-4).
+
+AGENT vs OPERATOR
+  AGENT     scripts/fairness_on_box.py, the assertion list, and the
+            analysis of the collected numbers.
+  OPERATOR  runs it on black-sky, supplies tokens, performs the mid-load
+            restart, and confirms nothing else was scheduled against the
+            office key in the window.
+
+FILES AND COMMANDS
+
+1. scripts/fairness_on_box.py, mirroring SPEC 23.5: a batch token
+   submits 200 getdemographic calls while an interactive token submits
+   one every 5 s; both go through POST /v1/tools over the tailnet (no
+   in-process shortcut -- that would bypass the receiver); per call it
+   records caller, priority, submit ts, response ts, and the response
+   meta (amd_calls, tier, peak, waited_ms, elapsed_ms) -- NO args, NO
+   results, NO patient identifiers; every 10 s it samples /health and
+   /metrics for entry_queue.depth, oldest_wait_ms, request_queue.depth,
+   clock used/limit per tier, and connector_session_relogins_total.
+   200 tier-2 calls against a 90%-margin cap is a MULTI-MINUTE run by
+   design: compute the expected wall-clock from the tier table first, so
+   the operator can tell progress from a hang.
+
+2. Choose the window deliberately. Peak/off-peak transitions are 06:00
+   and 18:00 America/Denver (SPEC 7.3/7.4; both this plan's Q-3 and the
+   consumer plan's A-3 flag that assumption as unverified with AMD). Run
+   entirely on one side of a transition and record which. Avoid the
+   legacy batch windows in docs/OPERATIONS.md.
+
+3. Restart mid-load, roughly halfway. Assert the clock does not exceed
+   the cap in the minute spanning the restart -- this is what
+   CLOCK_STATE_PATH persistence exists for (D21) -- and that the fresh
+   login consumes exactly one login-bucket slot.
+
+4. Record login-bucket behavior explicitly: logins attempted, refused,
+   and whether any refusal correlates with a legacy service's own login.
+   The bucket is roughly one per minute and it is SHARED.
+
+ACCEPTANCE GATE (G5) -- all five
+(a) Every interactive call started within one tool's duration plus its
+    queue wait; none stuck behind the batch backlog beyond that bound.
+(b) p95 interactive wait < 10 s measured DURING the batch (the SPEC 18.2
+    threshold; measuring at idle proves nothing).
+(c) clock used never exceeded clock limit for ANY tier at any sample,
+    including the minute spanning the restart.
+(d) No batch call waited past BATCH_AGING_MS (default 60 s) unpromoted.
+(e) Zero AMD 429s (SPEC 18.2: any 429 at all is a finding).
+
+ROLLBACK  Stop the script; the gateway is still dark and no consumer
+is affected. If the clock was driven to its cap, WAIT OUT THE WINDOW --
+do not delete clock.json to "reset" it. A wiped clock starts
+conservative but loses the record of what was already spent in the
+current window, which is exactly the overspend the file prevents.
+
+BLOCK RULE  BLOCK if any tier exceeded its cap: that is real money (AMD
+bills per excess call) and it means the clock is wrong, which is the one
+thing the gateway exists to get right. BLOCK if interactive p95
+exceeds 10 s under batch load -- consumers' interactive paths (chatbot,
+agents, admin-console) would be unusable during nightly runs, and the
+fix is a gateway change (SPEC 25's deferred two-in-flight
+priority-ordered sender), not a consumer workaround. DO NOT block on a
+single relogin: one 1025 recovery mid-load is designed behavior (SPEC
+8.2 -- exactly one re-login and one resend); a SECOND 1025 is
+session_failed and IS a block.
+
+RISKS  The run spends real AMD calls against the shared office key and
+can starve a legacy nightly -> schedule it and record the window. 200
+calls at tier-2 pacing may straddle a 06:00/18:00 transition and change
+the cap mid-run -> pick the window; if it straddles anyway, segment the
+analysis by peak flag rather than averaging across it. VirtualTime and
+box results WILL differ -- that is the point; differences are findings
+to record, not tests to suppress. A hung run looks like a correctly
+paced one for the first minute -> print expected-vs-actual call rate.
+
+SUBAGENT ORCHESTRATION
+  Execution shape: [SEQUENTIAL -- depends on R2]; concurrent with R4
+                   (disjoint files: R3 touches scripts/ and runtime/).
+  REQUIRED subagent_type: general-purpose
+  REQUIRED model: sonnet for the script (it mirrors an existing test's
+                  shape over HTTP); opus for the ANALYSIS, because a
+                  wrong read of the clock numbers is the one mistake
+                  here that costs money.
+  Run in background: yes for the script; no for the analysis.
+  Brief: "Execute PHASE R3 <script|analysis> of <PLAN_FILE_PATH>. Read
+   PHASE R3, SPEC 23.5, SPEC 7.3/7.4, and tests/load/test_fairness.py
+   first. For <script>: produce scripts/fairness_on_box.py -- it talks
+   ONLY to the gateway over HTTP with operator-supplied tokens from
+   the environment, never constructs an AMD request, never names an AMD
+   host, and never prints args, results, or any patient identifier. For
+   <analysis>: the run output is in
+   runtime/audits/gateway-hardening/R3.md -- grade the five G5
+   assertions, one verdict each, naming the evidence line for each.
+   Validation: five explicit PASS/FAIL verdicts with cited samples.
+   Print one-line summary and exit."
+
+
+---------------------------------------------------------------------
+PHASE R4. IMPLEMENT THE getehrnotes raw_xml PRODUCER
+---------------------------------------------------------------------
+
+OBJECTIVE  Give the gateway its FIRST raw_xml producer: getehrnotes
+returns result["raw_xml"] carrying AMD's note XML, delivered only to a
+token with phi AND raw_xml, and only after an
+annoying-compliance-officer APPROVE. Until this exists, SPEC 13.3's
+promise that note-audit's fetch_note_raw reads result["raw_xml"] is
+unimplemented and the consumer plan's PHASE 5 cannot start.
+
+ENTRY  SPLIT -- see SECTION -1.3, which supersedes the single entry
+condition this phase originally carried.
+
+  R4a (code + offline tests, steps 1-7)   ENTRY: G1 only.
+      Agent-executable offline. The handler, the two test files, the
+      ledger re-freeze, CLAUDE.md, D27 and docs/API.md need no
+      credential and no AMD contact -- they need
+      tests/fixtures/getehrnotes.reply.xml, which already exists
+      (confirm Q-6's two-rows-with-different-dates question first).
+      Acceptance: G6 (a) through (f) and (h) -- all offline-provable.
+
+  R4b (compliance gate + live exercise, step 8)   ENTRY: G4 AND R4a.
+      The annoying-compliance-officer verdict is its own Agent call and
+      inline-personation is FORBIDDEN. Any live exercise of the raw
+      path with getehrnotes live-checked is the operator's, per R2's
+      procedure. Acceptance: G6 (g).
+
+  G6 needs BOTH halves. R4a in main without R4b's APPROVE leaves a
+  producer nobody is entitled to read from, which is safe and is the
+  intended intermediate state -- note-audit's token can be issued in R1
+  without --raw-xml.
+
+R4 does NOT need G5 -- fairness and the raw_xml path are independent,
+so R3 and R4 may run concurrently.
+
+R4.3 DESIGN RULES (a builder MUST follow these; they are the review
+     criteria)
+
+  D-R4-1  NO SENDER CHANGE. send() returns a parsed element. Do not add
+          a raw-bytes side channel, a "last response body" ContextVar,
+          or a retained buffer. Each creates a process-wide place where
+          an AMD body lives outside the record that asked for it --
+          exactly what SPEC 17.1 forbids.
+  D-R4-2  RE-SERIALIZE, DO NOT RE-READ THE WIRE. Build the string from
+          the parsed tree (etree.tostring(..., encoding="unicode")).
+          Legitimate because the reference consumer does exactly that:
+          note-audit's fetch_note_raw builds a FRESH <PPMDResults>
+          wrapper around the matched <patientnote> and tostrings it.
+          Byte-fidelity to AMD's literal body is no consumer's
+          requirement. Record this in the ledger so a later reader does
+          not "fix" it into a raw-bytes path.
+  D-R4-3  THE FULL patientnotelist SUBTREE, NOT A PROJECTION.
+          note-audit date-filters and re-wraps on its side; a
+          gateway-side projection would reimplement the note parser
+          inside the gateway. That is why raw_xml is right for THIS
+          tool and wrong for gettxhistory and getchargedetaildata, which
+          get row projections in the consumer plan's C4.
+  D-R4-4  ADDITIVE ONLY. {patient_id, count} stay unchanged. raw_xml is
+          an ADDED key; additive fields are not a /v2 event (SPEC 11.6).
+          A caller without the flags sees today's result byte for byte,
+          because the worker OMITS rather than blanks (D26).
+  D-R4-5  THE HANDLER DOES NOT CHECK THE TOKEN. It always produces the
+          key; worker._apply_result_policy strips it for anyone lacking
+          phi AND raw_xml. A policy check in the handler duplicates the
+          gate, and two gates that can disagree are worse than one.
+  D-R4-6  NOTHING NEW MAY LOG, PERSIST, METER, OR ERROR ON THE STRING.
+          The audit key set is closed (SPEC 17.2); metrics labels are
+          closed (SPEC 18.1); the log filter redacts values over 200
+          chars and keys named result/args (SPEC 17.3). Verify all three
+          still hold WITH a producer present -- they were only ever
+          tested against a fake handler.
+  D-R4-7  ONE HOLDER. note-audit is the only --raw-xml token (SPEC
+          10.4). A second holder is a policy change needing its own
+          compliance pass.
+
+AGENT vs OPERATOR  Agent does the handler, tests, ledger re-freeze,
+CLAUDE.md text, D27, and the compliance packet. Operator does nothing
+unless the verdict asks for a live re-check of getehrnotes with the
+raw_xml path exercised, in which case R2's procedure applies.
+
+FILES AND COMMANDS
+
+1. domains/amd_ehr_mcp/handlers/getehrnotes.py. Today it calls
+   safe_amd_call_async(...) and returns {patient_id, count} where count
+   is count_rows_for_tags(raw_dict, "patientnote", "note", "ehrnote").
+   The producer needs the ELEMENT, not just raw_dict. Preferred: have
+   the handler serialize the element it already receives, computing
+   count exactly as today so the existing fixture assertion is
+   unchanged. If the package's _common wrapper truly discards the
+   element, add the SMALLEST possible accessor there and note it in the
+   ledger -- a domains/ change requires a docs/TOOL_TO_XML_MAP.md update
+   in the SAME change (CLAUDE.md). Rewrite the module docstring: "Count
+   only, no note text and no raw blob leaves the handler" becomes false
+   in this phase and must not be left to mislead. The docstring's other
+   OPEN ITEM -- note-audit also sends a practice-specific templateid
+   which this handler omits -- is GAP-17 and belongs to the consumer
+   plan's C4: do NOT quietly add a practice constant here.
+
+2. tests/integration/test_getehrnotes_raw_xml.py. Drive the real handler
+   against tests/fixtures/getehrnotes.reply.xml through the mock AMD
+   server and assert: a phi+raw_xml caller receives result["raw_xml"]
+   and it parses as XML containing the patientnote rows; patient_id and
+   count are UNCHANGED from the pre-R4 shape; a phi-only caller gets NO
+   "raw_xml" KEY AT ALL (omitted -- not empty, not None); a
+   raw_xml-only caller gets no key; an unresolvable caller gets no key;
+   and the audit line for a raw call has the SAME KEY SET as a non-raw
+   call.
+
+3. tests/invariants/test_raw_xml_producer_gated.py. The existing
+   test_raw_xml_requires_phi.py uses a FAKE handler and its docstring
+   says so ("no handler emits raw XML yet") -- that becomes stale. The
+   new invariant asserts the property against the REAL producer:
+   enumerate every registered tool, run each against its fixture, and
+   assert any tool producing a RAW_XML_KEYS key is in an explicit
+   allowlist of {getehrnotes}, so a future handler cannot start emitting
+   raw XML without a test failing; and assert the string never appears
+   in the audit serializer's output, in /metrics text, or in a log
+   record after the filter.
+
+4. docs/TOOL_TO_XML_MAP.md `## verification-ledger-getehrnotes`:
+   re-freeze the result shape with raw_xml, recording the D-R4-2
+   re-serialization provenance and the D-R4-3 full-subtree rationale.
+
+5. CLAUDE.md: extend the "SPEC 17.1 -- raw XML needs phi AND raw_xml"
+   bullet to name getehrnotes as the one producer and the new invariant.
+
+6. docs/GATEWAY_DECISIONS.md D27: the seven design rules with their
+   reasoning, plus the explicit statement that gettxhistory and
+   getchargedetaildata deliberately do NOT get raw_xml (they get row
+   projections in C4) because raw_xml is unredactable and a safe
+   projection exists for them.
+
+7. docs/API.md if the GET /v1/tools output or the documented result
+   envelope changes (SPEC 24 keeps docs/API.md current).
+
+8. COMPLIANCE PACKET, assembled by the builder and GRADED BY
+   annoying-compliance-officer as its own Agent call:
+   - exactly which tool gains raw_xml (getehrnotes only) and which token
+     may use it (note-audit, the only --raw-xml holder);
+   - proof the string is never on disk, logged, in an error, or in a
+     metric, citing the three tests;
+   - proof the audit line's KEY SET is identical for raw and non-raw;
+   - confirmation note-audit's token is phi=true, so redaction is not
+     being BYPASSED -- it was never applicable to that caller;
+   - the omission-not-blanking property and why it matters (a caller
+     cannot probe for the key's existence);
+   - downstream containment: note-audit holds note text in memory and
+     its own INV-1 forbids note text reaching a hosted model; this does
+     not widen that;
+   - explicit statement that the review does NOT pre-approve raw_xml for
+     any other tool or token.
+
+ACCEPTANCE GATE (G6)
+(a) Offline suite green and its count has GROWN by the new tests.
+(b) A phi+raw_xml caller receives a parseable result["raw_xml"]
+    containing the fixture's patientnote rows.
+(c) All three denial cases (phi-only, raw_xml-only, unknown caller)
+    yield NO raw_xml key -- asserted with `not in`, never `== ""` or
+    `is None`.
+(d) patient_id and count unchanged for every caller class.
+(e) Audit key set identical between a raw and a non-raw call.
+(f) The new invariant FAILS if a second handler starts producing a
+    raw-XML key -- prove it with a temporary local edit, then revert.
+(g) Compliance verdict APPROVE or APPROVE-WITH-CONDITIONS, conditions
+    closed and cited.
+(h) The getehrnotes ledger and the code agree (CLAUDE.md's
+    never-modify-domains-without-the-map rule).
+
+ROLLBACK  Two levels. Code: revert the handler commit -- the gate, the
+tests, and the token flag all pre-date it and stay. Policy: revoke
+note-audit's token and re-issue WITHOUT --raw-xml, then SIGHUP. That
+leaves the producer in place with nobody entitled to its output, which
+is strictly safe and needs no redeploy.
+
+BLOCK RULE  BLOCK on a compliance BLOCK. That halts R4 and the consumer
+plan's PHASE 5 (note-audit) -- and NOTHING ELSE. R5 still ships and the
+consumer plan's PHASES 0-4 and 6 still proceed with getehrnotes serving
+{patient_id, count} and note-audit staying on AMD_TRANSPORT=legacy. Say
+so in the handoff so nobody treats this BLOCK as a full stop. BLOCK if
+any R4.3 rule is violated, particularly D-R4-1 (no sender change) and
+D-R4-5 (the handler does not check the token) -- a second policy check
+inside the handler is a REJECT even if it "works". BLOCK if the
+count/patient_id shape moves: that is a frozen Appendix B shape and
+moving it is a /v2 event (SPEC 11.6), not a phase.
+
+RISKS
+- The `<key>_hash` sidecar. The Redactor leaves raw_xml_hash when it
+  blanks raw_xml; worker.strip_raw_xml already strips it. Assert it -- a
+  leaked hash of a note body is still a correlatable artifact.
+- Empty result. When AMD returns no notes the reference consumer returns
+  an empty <PPMDResults> shell with patientnotecount="0". Decide and
+  TEST the empty case explicitly: an empty shell string, not a missing
+  key, or note-audit cannot distinguish "no notes" from "not entitled"
+  (Q-5).
+- The 200-char log filter would redact a note string if it ever reached
+  a log record, but relying on the length rule is luck. The key-name
+  rule (result/args) and the fact that nothing logs the result are the
+  real defenses; assert both.
+- Fixture adequacy. getehrnotes.reply.xml must contain at least two
+  patientnote rows with different note dates or the downstream
+  date-filtering behavior is untested. If it does not, that is a request
+  to the OPERATOR for a new fixture (SPEC 23.3 step 4) -- the agent
+  stops and asks (Q-6).
+
+SUBAGENT ORCHESTRATION
+  Execution shape: R4a is [SEQUENTIAL -- depends on R0 only] per
+                   SECTION -1.3 and runs concurrent with R1, R2 and R3.
+                   R4b is its own [SINGLE] dispatch, AFTER R4a is
+                   drafted AND G4 has landed.
+  REQUIRED subagent_type: general-purpose for code and tests;
+                   annoying-compliance-officer for the gate as its own
+                   Agent call -- inline-personation is FORBIDDEN,
+                   because the whole point is that the model which wrote
+                   the PHI path is not the model that declares it safe.
+                   Optionally consensus-verification-duo for a final
+                   adversarial read of the denial cases, the one place a
+                   false PASS is unrecoverable.
+  REQUIRED model: opus for the code (first producer on an unredactable
+                  PHI path; a subtle error delivers a note body to a
+                  caller not entitled to it) and opus for the gate.
+                  NEVER haiku anywhere in R4.
+  Run in background: yes for the code; no for the gate.
+  Brief: "Execute PHASE R4 <code|gate> of <PLAN_FILE_PATH>. Read PHASE
+   R4 (especially R4.3's seven design rules), SPEC 17.1,
+   gateway/worker.py::_apply_result_policy, and
+   domains/amd_ehr_mcp/handlers/getehrnotes.py first. For <code>: touch
+   only that handler (plus the smallest possible accessor in that
+   package's handlers/_common.py if unavoidable), the two new test
+   files, the getehrnotes ledger entry in docs/TOOL_TO_XML_MAP.md,
+   CLAUDE.md, docs/API.md, docs/GATEWAY_DECISIONS.md. Do NOT touch
+   gateway/sender.py, gateway/worker.py, or any other handler. Do
+   NOT record a fixture -- if the existing one is inadequate, stop and
+   ask the operator. For <gate>: grade the packet in step 8 and return
+   APPROVE, APPROVE-WITH-CONDITIONS (list them), or BLOCK (list the
+   required fixes); do not edit code.
+   Validation: the eight G6 items, each with cited evidence.
+   Evidence: runtime/audits/gateway-hardening/R4.md.
+   Print one-line summary and exit."
+
+
+---------------------------------------------------------------------
+PHASE R5. HANDOFF -- UNBLOCK THE CONSUMER MIGRATION
+---------------------------------------------------------------------
+
+OBJECTIVE  One signed checklist a consumer-plan executor can read to
+confirm, item by item, that SPEC 22 step 0 is satisfied -- naming
+precisely which consumer phases are unblocked and which are held.
+
+ENTRY  G1, G3, G4, G5 passed. G6 is NOT required: if R4 blocked, R5
+ships with note-audit's phase marked HELD.
+
+AGENT vs OPERATOR  Agent drafts from the five evidence files and
+verifies each claim against the live endpoints where an unauthenticated
+or token-bearing read suffices. Operator SIGNS -- the signature is the
+gate, because the operator is the only party who ran the live checks and
+therefore the only party who can attest to them.
+
+THE CHECKLIST  SPEC 22 step 0's gate is "/health ok for 24 h; Appendix A
+tools verified; clock metrics visible; compliance APPROVE." Expanded,
+each line a claim with an evidence pointer:
+
+  H-1   /health answered ok for >= 24 h continuous.        R1.md + live
+  H-2   serving_pending_verification false in the deployed env.  live
+  H-3   All nine Appendix A tools verified true with no pending item --
+        OR a deliberately deferred tool is NAMED here with the single
+        consumer phase that waits on it.        live /v1/tools + code
+  H-4   Clock metrics visible and sane: connector_clock_used and
+        connector_clock_limit present per tier, used <= limit.  live
+  H-5   SPEC 17.6 compliance APPROVE on 17.1-17.5, conditions closed.
+                                                          R1.md
+  H-6   Fairness gate G5's five assertions all PASS.       R3.md
+  H-7   Eight tokens matching SPEC 10.4 exactly; note-audit the only
+        --raw-xml holder; patient-intake the only may_write;
+        WRITE_TOOLS_ENABLED false.     `gateway tokens list` (policy
+                                       only, never a hash or plaintext)
+  H-8   SIGHUP revocation lands on the next request; timings recorded.
+                                                          R1.md
+  H-9   ONE replica in the deployed Coolify service. Never scale
+        (SPEC 4.7/21).                            DEPLOY_RUNBOOK.md
+  H-10  8820 published on the tailnet address only; /health and /metrics
+        unreachable off-tailnet; sibling docs/PORTS.md lists it.
+                                                 `ss -ltnp` + PORTS.md
+  H-11  raw_xml PRESENT (producer shipped, compliance APPROVE) or
+        ABSENT (R4 blocked, reason recorded).               R4.md
+  H-12  Clean tree, CI green on the deployed SHA, deployed image
+        corresponds to that SHA.        R0.md + Coolify deploy record
+
+WHAT R5 UNBLOCKS, EXPLICITLY
+  By H-1..H-10 and H-12: the consumer plan's PHASE 0 (RAILS, SPEC 22
+  step 0) at /Users/aaron_7nh0yzm/orlando-derm-backend/lifecycle/
+  pending/plans/ADVANCEDMD_GATEWAY_MIGRATION_PLAN.txt, and through it
+  that plan's PHASE 1 (admin-console via /v1/login) and PHASE 2 (chatbot
+  plus workstation agents), neither of which needs result-shape work.
+  Additionally requires H-11: consumer PHASE 5 (note-audit).
+  Still requires that plan's own PHASE C (not this plan's business):
+  consumer PHASES 3, 4, 6 -- the GAP-1..20 result-shape work.
+  If uploadfile's live check was deferred per Q-2: consumer PHASE 6
+  (patient-intake, the only write) is HELD, and the hold is named HERE
+  rather than discovered THERE.
+
+ACCEPTANCE GATE (G7)  All twelve H-lines carry a verdict and an evidence
+pointer; no line reads "assumed"; the operator has signed; the
+unblock/hold list is filled in with actual phase names.
+
+ROLLBACK  Nothing to roll back -- R5 produces a document. If a claim
+proves false after signature, withdraw the handoff in writing and re-run
+the phase that produced it. A withdrawn handoff does not roll consumers
+back; consumers roll back by flipping AMD_TRANSPORT=legacy, which is
+their plan's mechanism.
+
+BLOCK RULE  BLOCK on any H-line that cannot be evidenced from a file or
+a live endpoint. "It should be fine" is a BLOCK. A handoff whose claims
+are not individually checkable is worse than no handoff, because the
+consumer plan's PHASE 0 explicitly leans on it (its A-5).
+
+RISKS  Drift between signature and consumer start: if more than a few
+days pass, H-1/H-2/H-4 must be re-read live -- they describe a running
+process, not a commit. A partial handoff is legitimate and preferable to
+a delayed one: H-11 ABSENT with uploadfile deferred still unblocks four
+consumer phases. And resist the temptation to edit the consumer plan
+while writing this -- report, do not rewrite.
+
+SUBAGENT ORCHESTRATION
+  Execution shape: [SEQUENTIAL -- joins on R0, R1, R2, R3, R4-if-run]
+  REQUIRED subagent_type: general-purpose to draft;
+                   consensus-verification-duo to adversarially verify
+                   the twelve claims before the operator is asked to
+                   sign -- warranted because this document is what
+                   another plan's PHASE 0 trusts, and a false PASS
+                   propagates into a live cutover.
+  REQUIRED model: opus for both (a verification gate over five phases'
+                  evidence).
+  Run in background: no.
+  Brief: "Execute PHASE R5 <draft|verify> of <PLAN_FILE_PATH>. Read
+   PHASE R5, SPEC 22's step 0 row, and every
+   runtime/audits/gateway-hardening/R*.md. For <draft>: produce the
+   twelve-line checklist with an evidence pointer per line and fill the
+   unblock/hold list with real phase names from the consumer plan at
+   /Users/aaron_7nh0yzm/orlando-derm-backend/lifecycle/pending/plans/
+   ADVANCEDMD_GATEWAY_MIGRATION_PLAN.txt -- you may READ that file,
+   you may NOT edit it. For <verify>: independently re-derive each claim
+   from the cited evidence and from live /health, /metrics, /v1/tools
+   where applicable; any claim you cannot re-derive is a BLOCK.
+   Validation: twelve verdicts, zero 'assumed'.
+   Evidence: runtime/audits/gateway-hardening/R5.md.
+   Print one-line summary and exit."
+
+
+---------------------------------------------------------------------
+SECTION 5. DEFERRED (NON-BLOCKING)
+---------------------------------------------------------------------
+
+5.1 Staff token issued after AMD validation, for console UX
+
+admin-console today uses POST /v1/login only: it forwards a staff
+credential to AMD and gets a boolean. A future improvement is that a
+SUCCESSFUL /v1/login also mints a short-lived GATEWAY token for that
+staff session, so the console can offer per-staff tooling without a
+shared service token.
+
+DEFERRED, non-blocking, not in scope of any R-phase. It needs a token
+lifetime model the table does not have (every entry today is long-lived
+with a revoked flag), a decision on which tools a staff token may call,
+and its own compliance pass. None of that gates the migration, and
+adding it now would change the SPEC 10.1 token-table shape that eight
+consumers are about to depend on. REVISIT after the consumer plan's
+PHASE 2, when the console's real UX need is observable.
+
+5.2 NEVER: per-user AMD sessions
+
+Not a deferral -- a permanent NO, and the single most important thing a
+future reader must not "improve". The gateway holds ONE AdvancedMD
+session, keyed on ONE office key, paced by ONE rate clock, in ONE
+process, with ONE replica (SPEC 4.5, 4.6, 4.7, 10.5, 21). AMD's caps are
+PER OFFICE KEY, it bills $0.01 per excess call, and it refuses logins
+faster than roughly once a minute. A per-user session means N logins
+against a one-per-minute bucket and N clocks against one cap -- exactly
+the failure the gateway was built to end. A staff token (5.1) is a
+GATEWAY-side credential over the shared AMD session; it is not, and
+must never become, a per-user AMD login. Anything shaped like "give each
+user their own AMD session" is rejected without a design review.
+
+
+---------------------------------------------------------------------
+SECTION 6. EXECUTOR ORCHESTRATION GUIDE
+---------------------------------------------------------------------
+
+6.1 Parallelism map
+
+  phase    execution   siblings  depends on        model   subagent_type
+  -------  ----------  --------  ----------------  ------  ---------------------------
+  R0       SINGLE      -         none              sonnet  general-purpose
+  R1.0     SINGLE      -         R0                opus    annoying-compliance-officer
+  R1       SEQUENTIAL  -         R1.0 APPROVE      sonnet  general-purpose (docs)
+  R2a.w    PARALLEL    2         R1 (G3)           sonnet  general-purpose
+  R2b.w    PARALLEL    2         R1 (G3)           sonnet  general-purpose
+  R2.post  SEQUENTIAL  -         operator sessions opus    general-purpose
+  R3.s     SEQUENTIAL  -         R2 (G4)           sonnet  general-purpose
+  R3.a     SEQUENTIAL  -         operator run      opus    general-purpose
+  R4a.c    SEQUENTIAL  -         R0 (G1)           opus    general-purpose
+  R4b.g    SINGLE      -         R4a + G4          opus    annoying-compliance-officer
+  R5.d     SEQUENTIAL  -         R0,R1,R2,R3[,R4]  opus    general-purpose
+  R5.v     SINGLE      -         R5.d              opus    consensus-verification-duo
+
+  R4a is now the widest concurrency in the plan, not R3-with-R4: per
+  SECTION -1.3 it depends only on G1, so it runs alongside the ENTIRE
+  operator track (R1's 24 h watch, R2's AMD sessions, R3's load window)
+  on disjoint files -- R4a touches domains/amd_ehr_mcp/, tests/, and
+  four docs, while R1/R2/R3 touch scripts/, runtime/, docs/OPERATIONS,
+  docs/LIVE_CHECK_LOG and gateway/verification.py. The one collision to
+  respect is docs/TOOL_TO_XML_MAP.md, which R2.post and R4a both edit
+  at DIFFERENT anchors; serialize those two edits or land them in one
+  commit. Everything else in the operator track is gated by an action
+  on a live service and cannot be parallelized by spending more agents.
+
+  DEPENDENCY DAG
+
+    R0
+     |
+     +----------------------------------------+
+     |                                        |
+     v                                        v
+    R1.0 (compliance, PRE-CREDENTIAL)        R4a (offline producer
+     |    --BLOCK--> STOP                     |   + tests) [agent,
+     v                                        |   runs concurrent with
+    R1 (deploy dark, 24 h, tokens, SIGHUP)    |   the whole operator
+     |                       [operator]       |   track)
+     v                                        |
+    R2a ---> R2.post <--- R2b                 |
+     |        [operator sessions; R2b waits    |
+     |         on consumer PHASE C per R2-SEQ] |
+     v                                        |
+     +------------------+                     |
+     |                  |                     |
+     v                  v                     v
+    R3 (fairness)      G4 reached ------> R4b.g (compliance gate)
+     |                                        |
+     |                                   --BLOCK--> consumer PHASE 5
+     |                                        |     held; R5 still ships
+     +--------+-------------------------------+
+              v
+            R5.d ---> R5.v ---> operator signature
+              |
+              v
+      consumer PHASE 0 unblocked
+      (orlando-derm-backend/lifecycle/pending/plans/
+       ADVANCEDMD_GATEWAY_MIGRATION_PLAN.txt)
+
+6.2 Cross-phase work consolidation
+
+- R1, R2, R3, R5 all read docs/OPERATIONS.md and SPEC 9.3/22/23. Small
+  files; per-phase re-reads beat distilling them into briefs.
+- R2's worksheets and R2.post both read docs/TOOL_TO_XML_MAP.md (~1250
+  lines). R2.post should read only the nine
+  `## verification-ledger-<action>` anchors, not the whole file.
+- FILE COLLISIONS, already serialized by dependency -- do NOT
+  "optimize" them into parallel siblings: R2.post and R4a both edit
+  docs/TOOL_TO_XML_MAP.md (different anchors); R0 and R4a both edit
+  docs/GATEWAY_DECISIONS.md (D24-D26 vs D27) and CLAUDE.md. R0's half
+  of that pair is DONE (SECTION -1.5), so R4a appends D27 after D26.
+- runtime/audits/gateway-hardening/R*.md is the ONLY channel between
+  phases. Every phase writes its own; no phase edits another's.
+
+6.3 Model-mix budget
+
+  Twelve dispatches: 0 fable, 7 opus, 5 sonnet, 0 haiku
+  -> roughly 0% fable / 58% opus / 42% sonnet / 0% haiku.
+
+  The opus share is high deliberately. Five of twelve dispatches are
+  GATES (two compliance reviews, one fairness analysis, one verification
+  application, one adversarial handoff verification) where a false PASS
+  is unrecoverable (a note body delivered to a caller not entitled to
+  it), expensive (AMD overage billing), or propagates into another
+  plan's live cutover. The five sonnet dispatches are documentation,
+  scripts, and worksheets.
+
+  ZERO fable: nothing here is frontier reasoning -- the design decisions
+  are already made in SPEC.md and R4.3. What is needed is care and
+  refusal to hand-wave, which opus supplies.
+  ZERO haiku: there is no trivial edit. Every file touched is a PHI
+  gate, a verification table, or a document another plan's gate reads.
+
+6.4 Estimated wall-clock
+
+  AGENT time with parallelism: ~4-6 hours of dispatches.
+  OPERATOR time is the binding constraint and is not compressible:
+    R1  24 h /health watch (mostly unattended) + ~1 h of service setup,
+        token issuance, and the SIGHUP drill
+    R2  two AMD sessions; tier-1 and tier-3 pacing plus the
+        review-on-the-box step means ~1-2 h each, not minutes
+    R3  one scheduled load window, multi-minute run plus a mid-load
+        restart, ~1-2 h including analysis review
+    R5  signature
+
+  CRITICAL PATH: R0 -> R1.0 -> R1 (the 24 h watch, irreducible) -> R2a
+  -> R2.post -> R4.c -> R4.g -> R5. Elapsed time is dominated by the
+  watch and by scheduling the operator's two AMD sessions and one load
+  window. Realistic: 3-5 calendar days, under a day of which is anybody
+  working. R2b is off the critical path for consumer PHASE 0 only if
+  H-3's deferred-tool bookkeeping is filled in honestly.
+
+6.5 Failure recovery policy
+
+  R0     retry up to 2x with the same subagent. A red fresh-clone suite
+         is a real defect: fix it, re-run, never skip.
+  R1.0   compliance BLOCK -> PAUSE AND ESCALATE. Never retry a
+         compliance gate with a different model hoping for a better
+         verdict; fix the finding, then re-review.
+  R1     deploy failure -> retry after fixing the named cause. Climbing
+         login refusals -> ESCALATE (AMD-side or legacy contention,
+         neither of which an agent can fix).
+  R2     a failed live check is a FINDING, not a phase failure: fix that
+         tool's request map, leave the row PENDING, continue with the
+         others. Escalate only if the map cannot be derived from a
+         reference client.
+  R3     a failed assertion -> ESCALATE. A cap breach or p95 blowout is
+         a gateway design finding (possibly SPEC 25's deferred
+         two-in-flight work), not something to retry.
+  R4a    code failing its own tests -> retry up to 2x.
+  R4b    Compliance BLOCK -> HALT R4, mark H-11 ABSENT, CONTINUE to R5.
+         This is the one BLOCK in the plan that is explicitly
+         survivable and the handoff must say so. R4a's code may stay in
+         main; revoke/withhold --raw-xml on note-audit's token instead
+         (the policy-level rollback in R4's ROLLBACK section).
+  R5     an unevidenced claim -> return to the phase that produced it.
+         Never sign around it.
+  DEFAULT for anything unlisted: pause and escalate.
+
+6.6 Audit trail location
+
+  Per-phase evidence: runtime/audits/gateway-hardening/R0.md through
+  R4.md. Final rollup (the signed handoff): R5.md. runtime/ is
+  gitignored (added in R0). Nothing in these files may contain a
+  credential, a token plaintext, an AMD response body, or a patient
+  identifier -- counts, dates, verdicts, and endpoint-shaped facts only.
+
+
+---------------------------------------------------------------------
+SECTION 7. OPEN QUESTIONS (operator input needed)
+---------------------------------------------------------------------
+
+Q-1  R2-SEQ: does R2b wait for the consumer plan's PHASE C, or does the
+     operator accept a second live-check session? RECOMMEND wait -- one
+     correct session beats two sessions and a stale date.
+Q-2  uploadfile's live check is a WRITE against a real chart. Verify it
+     in R2 with WRITE_TOOLS_ENABLED temporarily true, or defer it to the
+     consumer plan's PHASE 6 where the gated-upload procedure already
+     exists? RECOMMEND defer -- it removes the only write from this plan
+     and holds exactly one consumer phase.
+Q-3  Is AMD's peak window really America/Denver 06:00-18:00?
+     gateway/clock.py assumes it and the consumer plan flags it as
+     unverified. If wrong, every cap is applied in the wrong window.
+     Confirm with AMD or from observed 429 behavior BEFORE R3.
+Q-4  Health-watch cadence and where samples live: 60 s gives a clean
+     288+ sample set, 5 min is the gate minimum. Host timer, Coolify
+     scheduled task, or a screen session?
+Q-5  Empty-note semantics for R4: confirm raw_xml for a patient with no
+     matching notes is an empty <PPMDResults> shell string (matching the
+     reference consumer) rather than an absent key. RECOMMEND the empty
+     shell -- an absent key is indistinguishable from a denial.
+Q-6  Does tests/fixtures/getehrnotes.reply.xml contain at least two
+     patientnote rows with different note dates? If not, R4 needs a new
+     fixture, which is an operator action.
+
+
+---------------------------------------------------------------------
+SECTION 8. ESTIMATED EFFORT
+---------------------------------------------------------------------
+
+  phase  agent  operator  note
+  -----  -----  --------  -----------------------------------------
+  R0     M      XS        mechanical plus three prose records
+  R1.0   M      XS        one compliance verdict
+  R1     M      L         the 24 h watch dominates; irreducible
+  R2     M      XL        two AMD sessions at tier pacing -- the
+                          largest operator cost in the plan
+  R3     M      L         one scheduled load window plus a restart
+  R4     L      XS        first producer on an unredactable PHI
+                          path -- the largest agent cost
+  R5     S      XS        document plus signature
+
+  CRITICAL PATH CALLOUTS
+  1. R1's 24-hour watch cannot be shortened or parallelized and every
+     later gate is downstream of it. Start it the moment R1.0 approves.
+  2. R2's operator sessions: tier-1 pacing on getupdatedvisits and
+     tier-3 on lookuppatient mean real waiting, and the fixture review
+     is by hand on the box. Schedule both sessions before R1's watch
+     ends so they begin the moment G3 lands.
+  3. R4 is the only phase whose BLOCK is survivable; everything else
+     halts. Plan around that asymmetry -- if R4 looks slow, hand off
+     without it and let note-audit stay on legacy.
+
+=====================================================================
+END OF PLAN
+=====================================================================

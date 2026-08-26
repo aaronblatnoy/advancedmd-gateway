@@ -2,23 +2,23 @@
 
 Operator reference: the tokens CLI, deploy, rollback, alerts, the batch
 schedule, and the fixture procedure. See SPEC.md for the underlying
-contract; this file describes how to actually run the connector.
+contract; this file describes how to actually run the gateway.
 
 ## Tokens CLI
 
-Tokens are issued, revoked, and listed with the `connector` console
-script (`connector/tokens.py`), which reads and writes the JSON file at
-`CONNECTOR_TOKENS_PATH`.
+Tokens are issued, revoked, and listed with the `gateway` console
+script (`gateway/tokens.py`), which reads and writes the JSON file at
+`GATEWAY_TOKENS_PATH`.
 
 ```
-connector [--tokens-path PATH] tokens add NAME --priority {batch,interactive}
+gateway [--tokens-path PATH] tokens add NAME --priority {batch,interactive}
     [--phi] [--raw-xml] [--may-write TOOLS] [--tools TOOLS]
     [--per-minute N] [--max-queue N]
-connector [--tokens-path PATH] tokens revoke NAME
-connector [--tokens-path PATH] tokens list
+gateway [--tokens-path PATH] tokens revoke NAME
+gateway [--tokens-path PATH] tokens list
 ```
 
-- `--tokens-path` overrides `CONNECTOR_TOKENS_PATH`; the environment
+- `--tokens-path` overrides `GATEWAY_TOKENS_PATH`; the environment
   variable is used when the flag is omitted.
 - `add` prints the plaintext token once, to stdout, and never stores or
   can recover it afterward — copy it immediately.
@@ -27,7 +27,10 @@ connector [--tokens-path PATH] tokens list
 - `--phi` marks the caller as PHI-eligible; without it, results returned
   to that caller are redacted per the token policy.
 - `--raw-xml` allows the `raw_xml` result path (used by note-audit's
-  `fetch_note_raw`).
+  `fetch_note_raw`). It is a second permission on top of `--phi`, not a
+  substitute for it: the worker delivers AMD's XML string only when the
+  token carries BOTH flags, and strips the key entirely otherwise. A
+  `--raw-xml` token issued without `--phi` gets no raw XML at all.
 - `--may-write` is a comma-separated tool list; a tool must appear here
   AND have `WRITE_TOOLS_ENABLED=true` set globally before a write call
   through it succeeds.
@@ -40,7 +43,18 @@ connector [--tokens-path PATH] tokens list
 - `--max-queue` overrides the priority's default entry-queue cap for
   this caller.
 - `revoke NAME` revokes every live token for that name; exits 1 if none
-  was live.
+  was live. Both auth paths re-read the table on the request path, so a
+  revoked token starts failing with 401 without a restart — but the
+  re-read is throttled to once every 30 s (SPEC 10.1), so the old token
+  keeps working until that window elapses. To make a revocation land on
+  the very next request, send SIGHUP after revoking:
+
+  ```
+  gateway tokens revoke NAME && docker kill --signal=HUP advancedmd-gateway
+  ```
+
+  Do this whenever the reason for revoking is a suspected leak; waiting
+  out the window is only acceptable for routine rotation.
 - `list` prints callers and their policy; it never prints a hash or a
   plaintext token.
 
@@ -48,7 +62,7 @@ See docs/TOKENS.md for the token and policy data model in full.
 
 ## Deploy
 
-- Coolify project `advancedmd-connector` on black-sky. One service, one
+- Coolify project `advancedmd-gateway` on black-sky. One service, one
   replica, port 8820 mapped on the host, reachable on the compose
   network and the tailnet only — no public port.
 - A persistent volume at `/data` holds `clock.json` and the token table.
@@ -72,12 +86,12 @@ See docs/TOKENS.md for the token and policy data model in full.
 
 ## Rollback
 
-- Each backend consumer carries `AMD_TRANSPORT=legacy|connector` during
+- Each backend consumer carries `AMD_TRANSPORT=legacy|gateway` during
   migration (SPEC section 22). Rolling a consumer back is flipping that
   variable back to `legacy`; its vendored AMD client is not deleted
   until its migration step's gate has passed, so the rollback path
   stays live throughout the migration.
-- Rolling the connector itself back is a normal Coolify redeploy to the
+- Rolling the gateway itself back is a normal Coolify redeploy to the
   previous image/version. Clock state persists across restarts
   (`CLOCK_STATE_PATH`, decision D20); the session does not, so a
   rollback consumes one login-bucket slot on restart the same as any
@@ -102,7 +116,7 @@ text, SPEC 18.1) or, for the clock and queue state, from `GET /health`.
 
 ## Batch schedule
 
-The connector runs no batch jobs of its own; it serializes whatever its
+The gateway runs no batch jobs of its own; it serializes whatever its
 batch-priority callers submit, aging a batch backlog into promotion
 after `BATCH_AGING_MS` (default 60 s) so it cannot starve interactive
 traffic (SPEC 5.3). The consumers currently scheduled against it, per
@@ -162,16 +176,16 @@ To promote one tool:
    call count — no bodies — in that tool's ledger entry in
    `docs/TOOL_TO_XML_MAP.md` (`## verification-ledger-<action>`),
    replacing **PENDING OPERATOR** on the `Live check` line.
-3. Set the same date on the tool's row in `connector/verification.py`
+3. Set the same date on the tool's row in `gateway/verification.py`
    (`live_check="YYYY-MM-DD"`). That row is what the registry reads; the
    ledger entry is the record of why.
-4. Restart the connector. The tool now reports `"verified": true` with
+4. Restart the gateway. The tool now reports `"verified": true` with
    the date as `verified_at`, and is served.
 
 ### Serving before the live check
 
-`CONNECTOR_SERVE_PENDING_VERIFICATION` (SPEC 19, default **false**) exists
-so the connector can be exercised end to end before step 2 has happened.
+`GATEWAY_SERVE_PENDING_VERIFICATION` (SPEC 19, default **false**) exists
+so the gateway can be exercised end to end before step 2 has happened.
 When it is true, a tool whose ONLY missing checklist item is the live
 check is served; every other unverified tool still returns
 `tool_unverified`, and the tools still report `"verified": false`

@@ -22,8 +22,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from connector.interfaces import AUDIT_KEYS
-from connector.queues import PRIORITY_NAMES, ToolRequest
+from gateway.interfaces import AUDIT_KEYS
+from gateway.queues import PRIORITY_NAMES, ToolRequest
 
 __all__ = ["AuditKeyError", "AuditValueError", "serialize", "Auditor", "AUDIT_KEYS"]
 

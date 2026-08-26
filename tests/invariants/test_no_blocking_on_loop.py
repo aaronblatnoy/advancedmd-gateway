@@ -3,7 +3,7 @@
 Two halves, both live.
 
 The static half fails if anyone puts a `time.sleep` or a blocking
-`requests`-style post into connector/ or into a copied handler.
+`requests`-style post into gateway/ or into a copied handler.
 
 The end-to-end half builds the real object graph through
 lifecycle.wire_real_deps(), parks an AdvancedMD reply inside the real
@@ -49,7 +49,7 @@ def _nested_async_defs(node: ast.AST) -> set[int]:
 
 def python_files() -> list[Path]:
     out: list[Path] = []
-    for directory in ("connector", "domains"):
+    for directory in ("gateway", "domains"):
         root = REPO_ROOT / directory
         if not root.exists():
             continue
@@ -126,10 +126,10 @@ def _write_env(tmp_path) -> "tuple[Any, str]":
     The credentials are obvious placeholders. Nothing here is a secret and
     nothing here reaches AdvancedMD.
     """
-    from connector.config import load_config
-    from connector.interfaces import Caller
-    from connector.queues import PRIORITY_INTERACTIVE
-    from connector.tokens import TokenTable
+    from gateway.config import load_config
+    from gateway.interfaces import Caller
+    from gateway.queues import PRIORITY_INTERACTIVE
+    from gateway.tokens import TokenTable
 
     tokens_path = tmp_path / "tokens.json"
     table = TokenTable.open(tokens_path, create=True)
@@ -153,13 +153,13 @@ def _write_env(tmp_path) -> "tuple[Any, str]":
             "AMD_USERNAME": "PLACEHOLDER_USERNAME",
             "AMD_PASSWORD": "PLACEHOLDER_PASSWORD",
             "AMD_OFFICE_KEY": "000000",
-            "CONNECTOR_TOKENS_PATH": str(tokens_path),
+            "GATEWAY_TOKENS_PATH": str(tokens_path),
             "CLOCK_STATE_PATH": str(clock_path),
             "AMD_POST_TIMEOUT_S": "30",
             # SPEC 9.3 step 2 is the operator's; this test still has to
             # drive a real tool through the real graph, so it takes the
             # documented pre-live-check posture explicitly.
-            "CONNECTOR_SERVE_PENDING_VERIFICATION": "true",
+            "GATEWAY_SERVE_PENDING_VERIFICATION": "true",
         }
     )
     return config, plaintext
@@ -190,9 +190,9 @@ async def test_slow_amd_reply_does_not_delay_health(tmp_path):
     """
     import httpx
 
-    from connector.app import create_app
-    from connector.lifecycle import Lifecycle, wire_real_deps
-    from connector import sender as sender_module
+    from gateway.app import create_app
+    from gateway.lifecycle import Lifecycle, wire_real_deps
+    from gateway import sender as sender_module
 
     config, token = _write_env(tmp_path)
     gate = asyncio.Event()
@@ -212,7 +212,7 @@ async def test_slow_amd_reply_does_not_delay_health(tmp_path):
         await life.startup()
 
         client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://connector.test"
+            transport=httpx.ASGITransport(app=app), base_url="http://gateway.test"
         )
         try:
             # A tool call that will park inside the AMD post.

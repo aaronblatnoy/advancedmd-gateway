@@ -25,20 +25,20 @@ from typing import Any
 import httpx
 import pytest
 
-from connector.clock import LOGIN_TIER, RateClock, WINDOW_S, tier_for
-from connector.client_shim import AMDClient
-from connector.interfaces import Caller
-from connector.queues import (
+from gateway.clock import LOGIN_TIER, RateClock, WINDOW_S, tier_for
+from gateway.client_shim import AMDClient
+from gateway.interfaces import Caller
+from gateway.queues import (
     PRIORITY_BATCH,
     PRIORITY_INTERACTIVE,
     EntryQueue,
     RequestQueue,
     ToolRequest,
 )
-from connector.registry import build_registry
-from connector.verification import default_table
-from connector.worker import Worker, install_client_factories
-from connector import sender as sender_module
+from gateway.registry import build_registry
+from gateway.verification import default_table
+from gateway.worker import Worker, install_client_factories
+from gateway import sender as sender_module
 
 SYNTHETIC_FIXTURE_NOTE = (
     "synthetic fixture - hand-written from reference client XML shapes, "

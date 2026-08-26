@@ -1,7 +1,7 @@
 """SPEC 12.1, 12.2: the remote MCP surface.
 
 Everything here runs against fakes over an in-process ASGI transport. No
-connector is started, no AdvancedMD host is contacted, no credential is
+gateway is started, no AdvancedMD host is contacted, no credential is
 used, and no fixture carries patient data: the two tool names below are
 synthetic and the one result value is the string "synthetic".
 """
@@ -13,9 +13,9 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from connector.errors import AmdFault, ToolForbidden
-from connector.interfaces import Caller, RegistryEntry
-from connector.mcp_surface import (
+from gateway.errors import AmdFault, ToolForbidden
+from gateway.interfaces import Caller, RegistryEntry
+from gateway.mcp_surface import (
     DOMAINS,
     MCP_PROTOCOL_VERSION,
     ROUTE_DOMAINS,
@@ -150,8 +150,32 @@ async def open_session(client, path: str, headers=None) -> str:
 # ---------------------------------------------------------- the routes
 
 
+def _app_route_paths(app: FastAPI) -> set[str]:
+    """Collect path strings across FastAPI route wrappers.
+
+    Recent FastAPI/Starlette versions wrap ``include_router`` results as
+    ``_IncludedRouter``, which has no ``.path``. Walk the original router
+    (or any nested ``.routes``) so this assertion stays version-tolerant.
+    """
+    paths: set[str] = set()
+
+    def _walk(node: Any) -> None:
+        path = getattr(node, "path", None)
+        if isinstance(path, str):
+            paths.add(path)
+        for child in getattr(node, "routes", ()) or ():
+            _walk(child)
+        original = getattr(node, "original_router", None)
+        if original is not None:
+            _walk(original)
+
+    for route in app.routes:
+        _walk(route)
+    return paths
+
+
 def test_all_ten_routes_exist(app: FastAPI):
-    paths = {route.path for route in app.routes}
+    paths = _app_route_paths(app)
     for domain in DOMAINS:
         assert f"/mcp/{domain}" in paths
     assert "/mcp/all" in paths
@@ -450,7 +474,7 @@ class FakeReceiverResponse:
 
 
 class FakeReceiver:
-    """The duck shape of connector.receiver.Receiver.handle.
+    """The duck shape of gateway.receiver.Receiver.handle.
 
     Not an import: this lane never imports a sibling lane's module. It
     exists to prove `mount_mcp(app, deps, receiver=...)` really routes
@@ -468,7 +492,7 @@ class FakeReceiver:
 
 
 class LaneDDeps:
-    """Deps as connector/lifecycle.py names them: `token_table`."""
+    """Deps as gateway/lifecycle.py names them: `token_table`."""
 
     def __init__(self, tokens) -> None:
         self.registry = FakeRegistry()

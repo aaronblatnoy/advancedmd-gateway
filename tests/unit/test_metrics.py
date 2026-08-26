@@ -1,7 +1,7 @@
 """SPEC 18.1: the metric names, and what a label may carry.
 
 /metrics is a public, unauthenticated endpoint, so a label value is the
-easiest place in the whole connector for PHI to escape. These tests pin
+easiest place in the whole gateway for PHI to escape. These tests pin
 the name list to the spec and prove that anything that is not a short
 identifier is dropped before it reaches the exposition.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from connector.metrics import (
+from gateway.metrics import (
     LABEL_VALUE_MAX,
     METRIC_NAMES,
     OTHER,
@@ -17,7 +17,7 @@ from connector.metrics import (
     safe_label,
 )
 
-#: SPEC 18.1, transcribed here independently of connector/metrics.py so
+#: SPEC 18.1, transcribed here independently of gateway/metrics.py so
 #: the two have to agree.
 SPEC_18_1_NAMES = (
     "connector_tool_calls_total",

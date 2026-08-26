@@ -10,15 +10,15 @@ from dataclasses import replace
 
 import pytest
 
-from connector.interfaces import Caller, RegistryEntry
-from connector.registry import (
+from gateway.interfaces import Caller, RegistryEntry
+from gateway.registry import (
     DOMAIN_PACKAGES,
     RegistryBuildError,
     ToolRegistry,
     build_registry,
     default_tier_for,
 )
-from connector.verification import (
+from gateway.verification import (
     APPENDIX_A,
     LAUNCH_SET,
     PENDING_OPERATOR,
@@ -60,12 +60,12 @@ def test_every_appendix_a_tool_is_present_but_not_yet_verified(registry):
 
 
 def test_appendix_a_is_served_when_only_the_live_check_is_missing():
-    """SPEC 19 CONNECTOR_SERVE_PENDING_VERIFICATION, the testing posture."""
+    """SPEC 19 GATEWAY_SERVE_PENDING_VERIFICATION, the testing posture."""
     registry = build_registry(verification=VerificationTable(serve_pending=True))
 
     for name in APPENDIX_A:
         entry = registry.get(name)
-        # Still honestly unverified -- but served, so the connector can be
+        # Still honestly unverified -- but served, so the gateway can be
         # exercised end to end before the operator runs the live check.
         assert entry.verified is False, name
         assert entry.is_served is True, name
@@ -206,7 +206,7 @@ def test_tier_rule_defaults(registry):
 
 
 def test_an_injected_tier_table_wins():
-    """connector/clock.py owns the table; the registry only consumes it."""
+    """gateway/clock.py owns the table; the registry only consumes it."""
     registry = build_registry(tier_for=lambda action: 3)
 
     assert registry.get("amd_visits_get_updated_visits").tier == 3

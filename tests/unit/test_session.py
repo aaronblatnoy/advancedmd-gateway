@@ -12,9 +12,9 @@ import httpx
 import pytest
 from lxml import etree
 
-from connector.clock import LOGIN_TIER, RateClock
-from connector.errors import AmdUnavailable, LoginBucketWait, SessionFailed
-from connector.session import (
+from gateway.clock import LOGIN_TIER, RateClock
+from gateway.errors import AmdUnavailable, LoginBucketWait, SessionFailed
+from gateway.session import (
     DEFAULT_AMD_BASE_URL,
     REDIRECT_PATH,
     AmdSession,
@@ -124,7 +124,7 @@ async def test_default_base_url_is_the_partner_login_url(config):
 
 
 async def test_base_url_override_from_config_is_honored(config, base_env):
-    from connector.config import load_config
+    from gateway.config import load_config
 
     override = "https://override.example.invalid/xmlrpc/processrequest.aspx"
     cfg = load_config({**base_env, "AMD_BASE_URL": override})
@@ -414,7 +414,7 @@ def test_login_cache_key_is_a_sha256_of_the_three_fields():
 
 
 class FakeThrowaway:
-    """Records that a THROWAWAY session, not the connector's, was used."""
+    """Records that a THROWAWAY session, not the gateway's, was used."""
 
     made: list[dict] = []
 

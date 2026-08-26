@@ -89,11 +89,11 @@ def count_rows_for_tags(raw_dict: Any, *tags: str) -> int:
 
 
 # --------------------------------------------------------------------
-# Async bridge to the connector's client shim (SPEC 4.4, Amendment D-2).
+# Async bridge to the gateway's client shim (SPEC 4.4, Amendment D-2).
 #
 # amd_mcp_common.errors.safe_amd_call is synchronous: it was written for
-# the vendored blocking AMDClient. In the connector the client is
-# connector/client_shim.py, whose call() is a coroutine that awaits
+# the vendored blocking AMDClient. In the gateway the client is
+# gateway/client_shim.py, whose call() is a coroutine that awaits
 # send(). Calling the sync helper here would hand the handler an
 # un-awaited coroutine instead of a reply tree.
 #
@@ -105,16 +105,21 @@ def count_rows_for_tags(raw_dict: Any, *tags: str) -> int:
 # --------------------------------------------------------------------
 
 
-async def safe_amd_call_async(client, *, action: str, raw_to_dict_fn, **kwargs):
-    """Await ``client.call(...)`` and inspect the result for AMD faults.
+async def safe_amd_call_element_async(client, *, action: str, raw_to_dict_fn, **kwargs):
+    """As ``safe_amd_call_async``, but also hands back the parsed element.
 
-    Returns the same ``(raw_dict_or_None, error_envelope_or_None)``
-    2-tuple as ``amd_mcp_common.errors.safe_amd_call``.
+    Returns ``(element_or_None, raw_dict_or_None, error_envelope_or_None)``.
+
+    The element is the tree ``send()`` already parsed and returned -- it
+    is not a second read of the wire and nothing here retains it. Only
+    ``getehrnotes`` needs it, to re-serialize AMD's note list into
+    ``result["raw_xml"]`` (D-R4-1/D-R4-2, docs/GATEWAY_DECISIONS.md D27).
+    Every other handler keeps the 2-tuple wrapper below.
     """
     import inspect as _inspect
 
     from amd_mcp_common.errors import translate_amd_error
-    from connector.errors import ConnectorError
+    from gateway.errors import ConnectorError
 
     try:
         raw = client.call(action=action, **kwargs)
@@ -123,9 +128,21 @@ async def safe_amd_call_async(client, *, action: str, raw_to_dict_fn, **kwargs):
     except ConnectorError:
         raise
     except BaseException as exc:  # noqa: BLE001 - surface the envelope
-        return None, translate_amd_error(exc)
+        return None, None, translate_amd_error(exc)
     raw_dict = raw_to_dict_fn(raw)
     envelope = translate_amd_error(raw_dict)
     if envelope.get("error") and envelope["error"] != "ok":
-        return raw_dict, envelope
-    return raw_dict, None
+        return raw, raw_dict, envelope
+    return raw, raw_dict, None
+
+
+async def safe_amd_call_async(client, *, action: str, raw_to_dict_fn, **kwargs):
+    """Await ``client.call(...)`` and inspect the result for AMD faults.
+
+    Returns the same ``(raw_dict_or_None, error_envelope_or_None)``
+    2-tuple as ``amd_mcp_common.errors.safe_amd_call``.
+    """
+    _element, raw_dict, err = await safe_amd_call_element_async(
+        client, action=action, raw_to_dict_fn=raw_to_dict_fn, **kwargs
+    )
+    return raw_dict, err

@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from connector.errors import (
+from gateway.errors import (
     BadRequest,
     ConnectorError,
     ConnectorTimeout,
@@ -23,8 +23,8 @@ from connector.errors import (
     QueueFull,
     Unauthorized,
 )
-from connector.lifecycle import SHUTDOWN_RETRY_AFTER_S, Deps, Lifecycle
-from connector.queues import PRIORITY_BATCH, PRIORITY_INTERACTIVE, ToolRequest
+from gateway.lifecycle import SHUTDOWN_RETRY_AFTER_S, Deps, Lifecycle
+from gateway.queues import PRIORITY_BATCH, PRIORITY_INTERACTIVE, ToolRequest
 
 __all__ = [
     "Receiver",
@@ -90,7 +90,27 @@ class Receiver:
 
     # ------------------------------------------------------------ auth
 
-    def authenticate(self, token: str | None):
+    async def refresh_tokens(self) -> None:
+        """Pick up token-table edits before a lookup (SPEC 10.1, 10.2).
+
+        A revoked or deleted token must fail on the NEXT request, with no
+        restart, so the table is re-read here rather than only at startup.
+        The re-read stats and may re-read the file, which is disk I/O, so
+        it runs in a worker thread and never parks the loop (SPEC 4.4).
+        `reload_due` is an I/O-free predicate that keeps the common case
+        -- inside the 30 s throttle window -- off the thread pool
+        entirely; a table that does not offer it is simply reloaded.
+        """
+        table = self.deps.token_table
+        reload_if_changed = getattr(table, "reload_if_changed", None)
+        if reload_if_changed is None:
+            return
+        due = getattr(table, "reload_due", None)
+        if due is not None and not due():
+            return
+        await asyncio.to_thread(reload_if_changed)
+
+    async def authenticate(self, token: str | None):
         """SPEC 5.1 step 1. Returns a Caller; raises Unauthorized.
 
         Called before any record exists, so an unknown or revoked token
@@ -98,6 +118,7 @@ class Receiver:
         """
         if not token:
             raise Unauthorized()
+        await self.refresh_tokens()
         caller = self.deps.token_table.lookup(token)
         if caller is None:
             raise Unauthorized()
@@ -108,7 +129,7 @@ class Receiver:
     def parse(self, body: Any, caller) -> tuple[str, dict[str, Any], int]:
         """SPEC 5.1 steps 2 and 3. Raises BadRequest on anything malformed.
 
-        The BadRequest message is a constant (connector.errors): the
+        The BadRequest message is a constant (gateway.errors): the
         offending value is never echoed back.
         """
         if not isinstance(body, dict):
@@ -161,7 +182,7 @@ class Receiver:
         t0 = deps.monotonic()
         request_id = str(uuid.uuid4())
         try:
-            caller = self.authenticate(token)
+            caller = await self.authenticate(token)
         except ConnectorError as err:
             return self._error(err, request_id, 0.0, deps.monotonic() - t0)
 
@@ -219,7 +240,7 @@ class Receiver:
             return self._error(err, record.id, self._waited(record),
                                deps.monotonic() - t0)
         except Exception:
-            # A non-ConnectorError in a slot is a connector bug. Nothing
+            # A non-ConnectorError in a slot is a gateway bug. Nothing
             # the exception carries reaches the caller (SPEC 14).
             return self._error(InternalError(), record.id,
                                self._waited(record), deps.monotonic() - t0)

@@ -1,7 +1,7 @@
-# advancedmd-connector: Specification
+# advancedmd-gateway: Specification
 
 Version 1.0, 2026-08-20. Status: FINAL for build. This is the build
-contract. docs/CONNECTOR_DECISIONS.md records why each choice was made;
+contract. docs/GATEWAY_DECISIONS.md records why each choice was made;
 this document records what is built. Where they disagree, this document
 wins and the decision file is amended.
 
@@ -22,7 +22,7 @@ Contents
 10. Callers, tokens, and policy
 11. HTTP API
 12. MCP surface and agent installation
-13. Backend SDK (lib/advancedmd_connector)
+13. Backend SDK (lib/advancedmd_gateway)
 14. Errors, end to end
 15. Timeouts, limits, and retries
 16. Lifecycle: startup, shutdown, restart
@@ -45,7 +45,7 @@ Appendix C. Known defects in copied handlers
 
 ### 1.1 What it is
 
-advancedmd-connector is one program that is the only component in the
+advancedmd-gateway is one program that is the only component in the
 organization that communicates with AdvancedMD. Every consumer of
 AdvancedMD data, whether a backend workflow or an AI agent, sends it a
 tool call and receives a result. It holds the only AdvancedMD
@@ -66,7 +66,7 @@ chatbot's shared-token mechanism exists to paper over the login limit.
 G1. One process, one session, one clock. AdvancedMD's per-minute caps are
     enforced for real.
 G2. AdvancedMD credentials exist in exactly one place. Consumers hold a
-    connector URL and a per-app token.
+    gateway URL and a per-app token.
 G3. Interactive requests are never stuck behind batch jobs.
 G4. No behavior change for consumers: workflows keep method names and
     typed results; agents keep tool names, schemas, and redacted shapes.
@@ -105,14 +105,14 @@ Every term below is used with exactly this meaning.
 - tier: AdvancedMD's cost class for an action (1, 2, 3), each with its
   own per-minute cap.
 - tool: a named operation with named arguments, e.g.
-  getdemographic(patient_id). The only unit of request the connector
+  getdemographic(patient_id). The only unit of request the gateway
   accepts.
 - tool call: one request asking for one tool with arguments.
 - handler: the Python function implementing one tool.
 - AMD request: one XML message to AdvancedMD. A tool may make one or
   several.
 - tree: an AMD XML reply parsed into nested objects (lxml).
-- record: the connector's in-memory object for one tool call in
+- record: the gateway's in-memory object for one tool call in
   progress.
 - slot: an empty result holder (asyncio.Future). The code waiting on a
   slot wakes when it is filled.
@@ -135,7 +135,7 @@ Every term below is used with exactly this meaning.
 
 ```
  backend workflows ------ JSON tool call ------> +-----------------------------+
- (validator, srt-auths,                          |    advancedmd-connector     |
+ (validator, srt-auths,                          |    advancedmd-gateway     |
   note-audit, intake,                            |                             |
   admin-console, chatbot)                        |  HTTP API   MCP surface     |
                                                  |      \        /             |
@@ -165,7 +165,7 @@ a consumer; nothing outside the box holds AMD credentials or sends XML.
 
 ## 4. Process model and concurrency
 
-4.1 The connector is a single Python process running an asyncio event
+4.1 The gateway is a single Python process running an asyncio event
     loop under uvicorn, serving a FastAPI application.
 
 4.2 Receivers are async handler calls; hundreds may be waiting at once at
@@ -187,7 +187,7 @@ a consumer; nothing outside the box holds AMD credentials or sends XML.
 4.6 The clock, the session, the token table, and the registry are
     process-wide singletons created at startup and shared by reference.
 
-4.7 Horizontal scaling is forbidden: two connector instances would be two
+4.7 Horizontal scaling is forbidden: two gateway instances would be two
     clocks. Deployment MUST run one replica. /health reports an instance
     id so duplicate instances are detectable.
 
@@ -386,7 +386,7 @@ Peak = Monday to Friday, 06:00 to 18:00 America/Denver.
 
 ### 7.4 Tier table
 
-- A single table in connector/clock.py maps action name to tier. It is
+- A single table in gateway/clock.py maps action name to tier. It is
   the only authority; handler constants (TIER = ...) in copied code are
   ignored.
 - Seeded from AMD's examples plus every action in Appendix A. Unlisted
@@ -418,7 +418,7 @@ Peak = Monday to Friday, 06:00 to 18:00 America/Denver.
 ## 8. Session and login
 
 8.1 One login at startup. The login reply contains a redirect to the
-    real regional endpoint; the connector follows it and stores endpoint
+    real regional endpoint; the gateway follows it and stores endpoint
     and usercontext token in memory.
 
 8.2 AMD publishes no session duration. Expiry is signalled by fault code
@@ -443,7 +443,7 @@ Peak = Monday to Friday, 06:00 to 18:00 America/Denver.
 
 8.7 /v1/login (admin-console credential check) uses a separate
     throwaway AmdSession object and the same login bucket. It never
-    touches the connector's own session. Because the login bucket is
+    touches the gateway's own session. Because the login bucket is
     1/min, concurrent staff logins serialize; the second waits up to
     60 s. Mitigation: a successful credential check is cached in memory
     for LOGIN_CHECK_CACHE_S (default 300 s) keyed by
@@ -501,7 +501,7 @@ A tool with a ledger entry but an incomplete checklist is NOT verified.
 In particular, while step 2 is still PENDING OPERATOR the tool reports
 verified:false and returns tool_unverified.
 
-CONNECTOR_SERVE_PENDING_VERIFICATION (section 19, default false) is the
+GATEWAY_SERVE_PENDING_VERIFICATION (section 19, default false) is the
 one documented exception, for testing before the operator runs the live
 check: when true, a tool whose ONLY missing checklist item is step 2 is
 served, /health reports serving_pending_verification:true and status
@@ -515,7 +515,7 @@ check, the operator's date).
 
 ### 9.4 Launch set
 
-The tools in Appendix A are verified before the connector serves
+The tools in Appendix A are verified before the gateway serves
 production traffic. All others launch unverified and are promoted one at
 a time.
 
@@ -529,7 +529,7 @@ a time.
   operator readability: `validator_7f3a...`.
 - Stored hashed (sha256) in the token table; the plaintext is shown once
   at issuance and never stored or logged.
-- Token table: a JSON file at CONNECTOR_TOKENS_PATH, loaded at startup
+- Token table: a JSON file at GATEWAY_TOKENS_PATH, loaded at startup
   and re-read on SIGHUP or when its mtime changes (checked every 30 s).
   Shape:
 
@@ -543,11 +543,11 @@ a time.
 
 ### 10.2 Issuance and lifecycle
 
-- CLI inside the connector image:
-  `connector tokens add <name> --priority batch|interactive [--phi] [--raw-xml] [--may-write uploadfile] [--tools a,b,c] [--per-minute N]`
+- CLI inside the gateway image:
+  `gateway tokens add <name> --priority batch|interactive [--phi] [--raw-xml] [--may-write uploadfile] [--tools a,b,c] [--per-minute N]`
   prints the plaintext once and appends the hashed entry.
-  `connector tokens revoke <name>` sets revoked.
-  `connector tokens list` shows names and policy, never hashes.
+  `gateway tokens revoke <name>` sets revoked.
+  `gateway tokens list` shows names and policy, never hashes.
 - Rotation: add a new token for the same name, deploy it to the
   consumer, revoke the old one. Two active tokens per name are allowed.
 - Revoked tokens fail with 401 on the next request; in-flight records
@@ -583,7 +583,7 @@ may_write, returns ToolForbidden.
 
 ### 10.5 Office key
 
-- One office key, set by AMD_OFFICE_KEY in the connector's environment.
+- One office key, set by AMD_OFFICE_KEY in the gateway's environment.
   Tokens do not carry an office key in version 1. The clock and session
   are keyed on it so a later per-token office key is additive.
 
@@ -660,7 +660,7 @@ Filtered to the caller's tools allowlist.
  "serving_pending_verification": false}
 ```
 status is degraded when the session is degraded, a queue is over 80%
-of its cap, or CONNECTOR_SERVE_PENDING_VERIFICATION is true (section
+of its cap, or GATEWAY_SERVE_PENDING_VERIFICATION is true (section
 9.3); starting until the first login attempt has completed.
 
 ### 11.5 GET /metrics  (no token; internal network only)
@@ -687,7 +687,7 @@ another without changing prompts.
 
 ### 12.2 Remote surface (hosted agents)
 
-- The connector serves MCP over streamable HTTP at:
+- The gateway serves MCP over streamable HTTP at:
   `/mcp/patients`, `/mcp/visits`, `/mcp/providers`, `/mcp/codes`,
   `/mcp/billing`, `/mcp/payments`, `/mcp/masterfiles`, `/mcp/system`,
   `/mcp/ehr`, and `/mcp/all` (union, names unchanged).
@@ -698,11 +698,11 @@ another without changing prompts.
   return ToolUnverified if called.
 - tools/call is routed to the same receiver code path as POST /v1/tools
   with priority and redaction from the token. Errors map to MCP error
-  responses with the connector error code in the message.
+  responses with the gateway error code in the message.
 - Client config:
 ```
 {"mcpServers": {"amd-patients": {"type": "http",
-  "url": "http://advancedmd-connector:8820/mcp/patients",
+  "url": "http://advancedmd-gateway:8820/mcp/patients",
   "headers": {"Authorization": "Bearer <agent token>"}}}}
 ```
 
@@ -712,28 +712,28 @@ another without changing prompts.
   index (and installable from the repo with uvx --from git+…). Entry
   point: `advancedmd-mcp --domain <name>` or `--domain all`.
 - Speaks MCP over stdio to the agent. On start it calls GET /v1/tools
-  on the connector, caches the list for the session, and advertises it.
+  on the gateway, caches the list for the session, and advertises it.
   Each tools/call becomes POST /v1/tools. It holds no credentials, no
   tool logic, no AMD knowledge.
-- Environment: ADVANCEDMD_CONNECTOR_URL, ADVANCEDMD_CONNECTOR_TOKEN.
+- Environment: ADVANCEDMD_GATEWAY_URL, ADVANCEDMD_GATEWAY_TOKEN.
   Missing either: exits with a clear message.
 - Client config:
 ```
 {"mcpServers": {"amd-patients": {"command": "uvx",
   "args": ["advancedmd-mcp", "--domain", "patients"],
-  "env": {"ADVANCEDMD_CONNECTOR_URL": "http://100.94.62.115:8820",
-          "ADVANCEDMD_CONNECTOR_TOKEN": "<agent token>"}}}}
+  "env": {"ADVANCEDMD_GATEWAY_URL": "http://100.94.62.115:8820",
+          "ADVANCEDMD_GATEWAY_TOKEN": "<agent token>"}}}}
 ```
 
 ### 12.4 Claude Code plugin
 
 - `plugin/` in the repo contains `.claude-plugin/plugin.json` (name
   advancedmd, version, description) and `.mcp.json` declaring nine stdio
-  servers per 12.3 with `${ADVANCEDMD_CONNECTOR_URL}` and
-  `${ADVANCEDMD_CONNECTOR_TOKEN}` environment references.
+  servers per 12.3 with `${ADVANCEDMD_GATEWAY_URL}` and
+  `${ADVANCEDMD_GATEWAY_TOKEN}` environment references.
 - `claude plugin add <path or repo>/plugin` installs all nine. The same
   `.mcp.json` is valid for Cursor and Claude Desktop by copy.
-- A test starts the shim against a mock connector and asserts tools/list
+- A test starts the shim against a mock gateway and asserts tools/list
   parity with the remote surface.
 
 ### 12.5 Chatbot (Adam)
@@ -745,23 +745,23 @@ another without changing prompts.
 
 ---
 
-## 13. Backend SDK (lib/advancedmd_connector)
+## 13. Backend SDK (lib/advancedmd_gateway)
 
-Lives in orlando-derm-backend/lib/advancedmd_connector/. HTTP only. No
+Lives in orlando-derm-backend/lib/advancedmd_gateway/. HTTP only. No
 AMD credentials, no XML, no AMD URL. A CI grep enforces this
 (section 23.6).
 
 ### 13.1 Construction
 
 ```
-connector = AmdConnector.from_env()            # ADVANCEDMD_CONNECTOR_URL, ADVANCEDMD_CONNECTOR_TOKEN
-connector = AmdConnector(url, token, timeout_s=None)
+gateway = AmdGateway.from_env()              # ADVANCEDMD_GATEWAY_URL, ADVANCEDMD_GATEWAY_TOKEN
+gateway = AmdGateway(url, token, timeout_s=None)
 ```
 
 ### 13.2 Generic call
 
 ```
-connector.tool(name: str, **args) -> dict      # result dict; raises per 13.4
+gateway.tool(name: str, **args) -> dict      # result dict; raises per 13.4
 ```
 
 ### 13.3 Typed wrappers (names preserved from the vendored clients)
@@ -786,7 +786,7 @@ connector.tool(name: str, **args) -> dict      # result dict; raises per 13.4
 - uploadfile enforces the 1024 KB decoded cap client-side before
   calling, as today, and is never retried automatically (13.5).
 - note-audit keeps its fetch_* layer and its action allowlist; its
-  transport becomes connector.tool(...) with result["raw_xml"] for
+  transport becomes gateway.tool(...) with result["raw_xml"] for
   fetch_note_raw.
 
 ### 13.4 Exceptions (preserved names)
@@ -795,7 +795,7 @@ connector.tool(name: str, **args) -> dict      # result dict; raises per 13.4
 AMDError(Exception)                 base, as today
   AuthError(AMDError)               unauthorized token; login_check refused; session_failed
   APIError(AMDError)                amd_fault (has .code, .fault as today), tool_forbidden, tool_unverified, tool_unknown, tool_args_invalid
-  ConnectorError(AMDError)          new: queue_wait_exceeded, queue_full, connector_timeout, amd_unavailable, transport failure to the connector
+  ConnectorError(AMDError)          new: queue_wait_exceeded, queue_full, connector_timeout, amd_unavailable, transport failure to the gateway
 ```
 Existing `except (AuthError, APIError)` sites keep working. New code
 may catch ConnectorError for retry decisions.
@@ -813,7 +813,7 @@ may catch ConnectorError for retry decisions.
 ### 13.6 Timeouts
 
 Client timeout = max_wait_ms + EXECUTION_ALLOWANCE_MS (section 15) + 5 s
-network margin, so the connector's own errors always arrive before the
+network margin, so the gateway's own errors always arrive before the
 client gives up.
 
 ---
@@ -871,7 +871,7 @@ to the sender loop.
 ### 16.1 Startup
 
 1. Load config; fail fast on missing AMD_USERNAME, AMD_PASSWORD,
-   AMD_OFFICE_KEY, CONNECTOR_TOKENS_PATH.
+   AMD_OFFICE_KEY, GATEWAY_TOKENS_PATH.
 2. Load token table; fail fast if unreadable or empty.
 3. Load clock state (7.5) or start conservative.
 4. Build registry; log counts of verified/unverified; fail fast if any
@@ -914,7 +914,7 @@ to the sender loop.
 
 - args and results may contain PHI. They exist in memory only and are
   returned to the caller. They are never written to disk by the
-  connector, never logged, never included in errors or metrics.
+  gateway, never logged, never included in errors or metrics.
 - The raw_xml path returns AMD's XML string to callers whose token
   allows it; same rules.
 - The token table contains no PHI. The clock state file contains
@@ -943,12 +943,12 @@ A test asserts the audit serializer rejects any key outside this set.
 
 ### 17.4 Network and transport
 
-- The connector binds to the Docker compose network and the Tailscale
+- The gateway binds to the Docker compose network and the Tailscale
   interface only. No public port. /health and /metrics are unauthenticated
   but unreachable from outside the tailnet.
 - Transport inside the tailnet is WireGuard-encrypted by Tailscale; no
   additional TLS termination in version 1. Recorded as an accepted risk
-  in CONNECTOR_DECISIONS.md with the condition that the tailnet remains
+  in GATEWAY_DECISIONS.md with the condition that the tailnet remains
   the only route.
 - AMD traffic is HTTPS with TLS 1.2+ as AMD requires.
 
@@ -1007,9 +1007,9 @@ connector_up{instance_id}                              gauge
 | AMD_OFFICE_KEY | yes | | office code; clock and session key |
 | AMD_APP_NAME | no | TEMP | AMD appname attribute |
 | AMD_BASE_URL | no | AMD partner login URL | override for testing |
-| CONNECTOR_TOKENS_PATH | yes | | token table JSON |
-| CONNECTOR_PORT | no | 8820 | |
-| CONNECTOR_BIND | no | 0.0.0.0 | restricted by network, not by bind |
+| GATEWAY_TOKENS_PATH | yes | | token table JSON |
+| GATEWAY_PORT | no | 8820 | |
+| GATEWAY_BIND | no | 0.0.0.0 | restricted by network, not by bind |
 | CLOCK_STATE_PATH | no | /data/clock.json | persisted window |
 | CLOCK_MARGIN | no | 0.90 | |
 | EXECUTION_ALLOWANCE_MS | no | 120000 | |
@@ -1020,31 +1020,31 @@ connector_up{instance_id}                              gauge
 | SHUTDOWN_DRAIN_S | no | 30 | |
 | LOG_LEVEL | no | INFO | |
 | WRITE_TOOLS_ENABLED | no | false | global gate; per-token may_write still required |
-| CONNECTOR_SERVE_PENDING_VERIFICATION | no | false | serve tools whose only missing 9.3 item is the operator live check; /health then reports degraded. False in production |
+| GATEWAY_SERVE_PENDING_VERIFICATION | no | false | serve tools whose only missing 9.3 item is the operator live check; /health then reports degraded. False in production |
 
 Consumers:
 
 | variable | who |
 |---|---|
-| ADVANCEDMD_CONNECTOR_URL | every backend app and shim |
-| ADVANCEDMD_CONNECTOR_TOKEN | every backend app and shim, one per app |
-| AMD_TRANSPORT | backend apps during migration: legacy or connector |
+| ADVANCEDMD_GATEWAY_URL | every backend app and shim |
+| ADVANCEDMD_GATEWAY_TOKEN | every backend app and shim, one per app |
+| AMD_TRANSPORT | backend apps during migration: legacy or gateway |
 
 ---
 
 ## 20. Repository layout
 
 ```
-advancedmd-connector/
+advancedmd-gateway/
   README.md
   SPEC.md
   CLAUDE.md                        repo map + invariants for agents working here
   docs/
-    CONNECTOR_DECISIONS.md
+    GATEWAY_DECISIONS.md
     TOOL_TO_XML_MAP.md             per-tool AMD request map + verification ledger
     API.md                         mirrors section 11
     OPERATIONS.md                  tokens CLI, deploy, alerts, batch schedule
-  connector/
+  gateway/
     __init__.py
     app.py                         FastAPI app, routes, lifecycle hooks
     config.py                      section 19
@@ -1089,7 +1089,7 @@ advancedmd-connector/
 
 ## 21. Deployment
 
-- Coolify project `advancedmd-connector` on black-sky. One service, one
+- Coolify project `advancedmd-gateway` on black-sky. One service, one
   replica, port 8820 mapped on the host (ports_mappings), reachable on
   the compose network and the tailnet only.
 - Volume: /data for clock.json and the token table.
@@ -1105,15 +1105,15 @@ advancedmd-connector/
 
 ## 22. Migration and cutover
 
-Each backend service carries AMD_TRANSPORT=legacy|connector until done.
+Each backend service carries AMD_TRANSPORT=legacy|gateway until done.
 Order, with the gate for each:
 
 | step | who | gate to proceed |
 |---|---|---|
-| 0 | connector deployed | /health ok for 24 h; Appendix A tools verified; clock metrics visible; compliance APPROVE |
+| 0 | gateway deployed | /health ok for 24 h; Appendix A tools verified; clock metrics visible; compliance APPROVE |
 | 1 | admin-console via /v1/login | staff logins succeed for 3 days; remove its AMD vendored client and env |
 | 2 | agents: Cursor and local agents via plugin or remote; chatbot via remote surface | tools/list parity test green; chatbot shared_token removed |
-| 3 | appointment-validator | one nightly run on connector matches legacy output on the same date (operator compares on the box) |
+| 3 | appointment-validator | one nightly run on gateway matches legacy output on the same date (operator compares on the box) |
 | 4 | srt-auths | one scan and one event run green |
 | 5 | note-audit | one daily run green; raw_xml path exercised |
 | 6 | patient-intake | dry-run green; then a single gated upload with INTAKE_WRITE_ENABLED and signed marker, verified via get_chart_files |
@@ -1151,7 +1151,7 @@ client is not deleted until the step's gate passes.
   /health and /metrics.
 - MCP surface: tools/list per domain; tools/call routes through the
   worker; error mapping.
-- Shim parity: stdio shim against the mock connector lists identical
+- Shim parity: stdio shim against the mock gateway lists identical
   tools to the remote surface.
 - Lifecycle: startup with login refused serves degraded; SIGTERM drains.
 
@@ -1170,7 +1170,7 @@ client is not deleted until the step's gate passes.
 
 ### 23.4 Live (operator-run, on the box)
 
-- One call per Appendix A tool against AdvancedMD through the connector;
+- One call per Appendix A tool against AdvancedMD through the gateway;
   audit lines checked for ids-only; /metrics checked for counts.
 - /v1/login with a real staff credential and with a wrong password.
 
@@ -1185,16 +1185,16 @@ client is not deleted until the step's gate passes.
 
 ### 23.6 Invariants (CI, both repos)
 
-- connector: no httpx/requests import and no AMD URL outside
-  connector/sender.py and connector/session.py; no blocking call on the
+- gateway: no httpx/requests import and no AMD URL outside
+  gateway/sender.py and gateway/session.py; no blocking call on the
   event loop (a test injects a slow AMD reply and polls /health).
-- backend: no file outside lib/advancedmd_connector/ may contain
+- backend: no file outside lib/advancedmd_gateway/ may contain
   partnerlogin.advancedmd.com, AMD_USERNAME, AMD_PASSWORD, or define a
   class named AMDClient. Runs in pytest for the whole tree.
 
 ### 23.7 Acceptance
 
-The connector is accepted for step 0 when 23.1, 23.2, 23.5, and 23.6 are
+The gateway is accepted for step 0 when 23.1, 23.2, 23.5, and 23.6 are
 green in CI; 23.4 has been run by the operator; and 17.6 has returned
 APPROVE or APPROVE-WITH-CONDITIONS with conditions closed.
 
@@ -1212,7 +1212,7 @@ APPROVE or APPROVE-WITH-CONDITIONS with conditions closed.
 - docs/API.md: section 11 verbatim, kept current.
 - docs/OPERATIONS.md: tokens CLI, deploy, rollback, alerts, fixture
   procedure.
-- docs/CONNECTOR_DECISIONS.md: amended with D18 (tailnet-only transport
+- docs/GATEWAY_DECISIONS.md: amended with D18 (tailnet-only transport
   accepted risk), D19 (login-check cache), D20 (clock persistence).
 - orlando-derm-backend: docs/API.md, docs/PORTS.md (8820),
   docs/WORKFLOWS.md updated; each migrated service's CLAUDE.md notes the
@@ -1247,7 +1247,7 @@ APPROVE or APPROVE-WITH-CONDITIONS with conditions closed.
 | getehrnotes | ehr | getehrnotes / (per note-audit client) | 2 | note-audit (raw_xml) |
 | gettxhistory | payments | gettxhistory / (per note-audit client) | 2 | note-audit |
 | getchargedetaildata | billing | getchargedetaildata / (per note-audit client) | 2 | note-audit |
-| login (internal) | | login / login | login bucket | connector; /v1/login |
+| login (internal) | | login / login | login bucket | gateway; /v1/login |
 
 Reference implementations for request XML: the backend's vendored
 clients (appointment-validator, srt-auths, patient-intake, note-audit).
@@ -1288,11 +1288,11 @@ D-1 Tool naming. Policy tool_name values (e.g. amd_patients_get_demographic)
     accept either; GET /v1/tools lists aliases; MCP tools/list advertises
     canonical names only, preserving 12.1 parity with amd-mcp.
 D-2 No vendored AMD client. amd-mcp's amd_client/client.py is not copied
-    (it opens sockets, violating 6.2). connector/client_shim.py provides an
+    (it opens sockets, violating 6.2). gateway/client_shim.py provides an
     AMDClient-shaped facade (call, get_patient_bundle, get_visits_for_date,
     get_appointments_via_reminders) that builds XmlRequest objects and
     awaits send(), so copied handler call sites are unchanged.
-    amd_mcp_common.rate_limit is likewise not copied; connector/clock.py is
+    amd_mcp_common.rate_limit is likewise not copied; gateway/clock.py is
     the only clock.
 D-3 Appendix C defect 1 is fixed only where it blocks an Appendix A tool;
     all other affected tools remain unverified per 9.2.

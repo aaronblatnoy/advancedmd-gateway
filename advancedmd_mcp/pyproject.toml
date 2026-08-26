@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "advancedmd-mcp"
 version = "1.0.0"
-description = "Local stdio MCP shim for advancedmd-connector. Holds no credentials, no tool logic, no AdvancedMD knowledge."
+description = "Local stdio MCP shim for advancedmd-gateway. Holds no credentials, no tool logic, no AdvancedMD knowledge."
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
 dependencies = [

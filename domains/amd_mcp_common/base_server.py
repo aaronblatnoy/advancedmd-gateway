@@ -45,7 +45,7 @@ from .errors import (
     to_envelope,
 )
 from .knowledge_loader import ActionPolicy
-# removed: rate limiting is owned by connector/clock.py
+# removed: rate limiting is owned by gateway/clock.py
 from .redact import Redactor
 
 
@@ -92,7 +92,7 @@ def register_all(
     write_tools_enabled: bool,
     settings: Settings,
     redactor: Redactor,
-    rate_limiter: Any,  # removed: rate limiting is owned by connector/clock.py
+    rate_limiter: Any,  # removed: rate limiting is owned by gateway/clock.py
     audit_emit: Callable[..., Any] | None = None,
 ) -> Any:
     """Wire ``@list_tools`` and ``@call_tool`` onto ``server``.
@@ -157,7 +157,7 @@ async def wrap_tool(
     permitted_actions: tuple,
     settings: Settings,
     redactor: Redactor,
-    rate_limiter: Any,  # removed: rate limiting is owned by connector/clock.py
+    rate_limiter: Any,  # removed: rate limiting is owned by gateway/clock.py
     policy: ActionPolicy | None = None,
     action: str = "",
     domain: str = "",

@@ -13,7 +13,7 @@ What this module deliberately does NOT do:
   - import httpx, requests, or any HTTP client
   - name or construct an AdvancedMD URL
   - log in, hold a token, retry, sleep, or rate-limit
-Login belongs to connector/session.py, pacing to connector/clock.py, and
+Login belongs to gateway/session.py, pacing to gateway/clock.py, and
 retries to the sender loop (SPEC 15: "Handlers MUST NOT sleep or retry on
 their own").
 
@@ -30,8 +30,8 @@ from typing import Any, Awaitable, Callable, Iterable
 
 from lxml import etree
 
-from connector.errors import ToolArgsInvalid
-from connector.queues import PRIORITY_INTERACTIVE, XmlRequest
+from gateway.errors import ToolArgsInvalid
+from gateway.queues import PRIORITY_INTERACTIVE, XmlRequest
 
 __all__ = ["AMDClient", "amd_date", "DEFAULT_APPTSTATUS"]
 

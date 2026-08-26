@@ -1,4 +1,4 @@
-# SPEC 23.6/23.7: the connector-side invariants must actually execute
+# SPEC 23.6/23.7: the gateway-side invariants must actually execute
 # somewhere. This is that somewhere.
 #
 # No job in this workflow may contact AdvancedMD, and no credential is

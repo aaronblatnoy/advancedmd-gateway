@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from connector.queues import (
+from gateway.queues import (
     PRIORITY_BATCH,
     PRIORITY_INTERACTIVE,
     EntryQueue,

@@ -1,13 +1,13 @@
-# advancedmd-connector, SPEC 21.
+# advancedmd-gateway, SPEC 21.
 #
 # ONE service, ONE replica. This is a correctness constraint, not a
 # capacity choice: the rate clock and the AMD session are process-wide
 # singletons (SPEC 4.6, 4.7). Never scale this service.
 services:
-  advancedmd-connector:
+  advancedmd-gateway:
     build: .
-    image: advancedmd-connector:1.0.0
-    container_name: advancedmd-connector
+    image: advancedmd-gateway:1.0.0
+    container_name: advancedmd-gateway
     restart: unless-stopped
     # SPEC 4.7 / 21: exactly one replica.
     deploy:
@@ -24,11 +24,11 @@ services:
       AMD_OFFICE_KEY: ${AMD_OFFICE_KEY:?set AMD_OFFICE_KEY}
       AMD_APP_NAME: ${AMD_APP_NAME:-TEMP}
       AMD_BASE_URL: ${AMD_BASE_URL:-}
-      CONNECTOR_TOKENS_PATH: ${CONNECTOR_TOKENS_PATH:-/data/tokens.json}
-      CONNECTOR_PORT: ${CONNECTOR_PORT:-8820}
+      GATEWAY_TOKENS_PATH: ${GATEWAY_TOKENS_PATH:-/data/tokens.json}
+      GATEWAY_PORT: ${GATEWAY_PORT:-8820}
       # Inside the container's own network namespace; the host-side publish
       # above is what limits exposure.
-      CONNECTOR_BIND: ${CONNECTOR_BIND:-0.0.0.0}
+      GATEWAY_BIND: ${GATEWAY_BIND:-0.0.0.0}
       CLOCK_STATE_PATH: ${CLOCK_STATE_PATH:-/data/clock.json}
       CLOCK_MARGIN: ${CLOCK_MARGIN:-0.90}
       EXECUTION_ALLOWANCE_MS: ${EXECUTION_ALLOWANCE_MS:-120000}
@@ -41,10 +41,10 @@ services:
       WRITE_TOOLS_ENABLED: ${WRITE_TOOLS_ENABLED:-false}
       # SPEC 9.3 / 19. Stays false in production: a tool whose operator
       # live check is still pending returns tool_unverified. Set true only
-      # to exercise the connector before the live check is recorded.
-      CONNECTOR_SERVE_PENDING_VERIFICATION: ${CONNECTOR_SERVE_PENDING_VERIFICATION:-false}
+      # to exercise the gateway before the live check is recorded.
+      GATEWAY_SERVE_PENDING_VERIFICATION: ${GATEWAY_SERVE_PENDING_VERIFICATION:-false}
     volumes:
-      - connector-data:/data
+      - gateway-data:/data
     healthcheck:
       test:
         - CMD-SHELL
@@ -58,4 +58,4 @@ services:
     stop_grace_period: 45s
 
 volumes:
-  connector-data:
+  gateway-data:

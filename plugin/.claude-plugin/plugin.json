@@ -1,5 +1,5 @@
 {
   "name": "advancedmd",
   "version": "1.0.0",
-  "description": "AdvancedMD tools for Claude Code, served by advancedmd-connector. Nine stdio MCP servers (patients, visits, providers, codes, billing, payments, masterfiles, system, ehr) that proxy to the connector; no AdvancedMD credentials live here."
+  "description": "AdvancedMD tools for Claude Code, served by advancedmd-gateway. Nine stdio MCP servers (patients, visits, providers, codes, billing, payments, masterfiles, system, ehr) that proxy to the gateway; no AdvancedMD credentials live here."
 }

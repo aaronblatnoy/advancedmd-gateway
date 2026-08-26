@@ -24,12 +24,12 @@ from typing import Any
 import pytest
 from lxml import etree
 
-from connector.client_shim import AMDClient
-from connector.interfaces import AUDIT_KEYS, Caller
-from connector.queues import PRIORITY_INTERACTIVE, ToolRequest
-from connector.registry import build_registry
-from connector.verification import APPENDIX_A, LAUNCH_SET, default_table
-from connector.worker import Worker, install_client_factories
+from gateway.client_shim import AMDClient
+from gateway.interfaces import AUDIT_KEYS, Caller
+from gateway.queues import PRIORITY_INTERACTIVE, ToolRequest
+from gateway.registry import build_registry
+from gateway.verification import APPENDIX_A, LAUNCH_SET, default_table
+from gateway.worker import Worker, install_client_factories
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 REQUEST_MAP = json.loads((FIXTURES / "appendix_a_requests.json").read_text())
@@ -116,7 +116,7 @@ class AllowAll:
 def registry():
     install_client_factories()
     # SPEC 9.3 step 2 is the operator's live call and cannot happen here,
-    # so this suite takes the CONNECTOR_SERVE_PENDING_VERIFICATION
+    # so this suite takes the GATEWAY_SERVE_PENDING_VERIFICATION
     # posture: everything else on the checklist is recorded, and the
     # worker is allowed to run the handler.
     return build_registry(verification=default_table(serve_pending=True))
@@ -313,7 +313,7 @@ async def test_getdemographic_refuses_a_chart_number_instead_of_guessing(
     """SPEC Appendix C defect 2: chart_number must not ride the patientid path."""
     sender = RecordingSender(load_reply("getdemographic.reply.xml"))
     entry = registry.get("amd_patients_get_demographic")
-    from connector.worker import current_client
+    from gateway.worker import current_client
 
     token = current_client.set(
         AMDClient(sender, record_id="synthetic-record", priority=PRIORITY_INTERACTIVE)
@@ -331,7 +331,7 @@ async def test_uploadfile_refuses_over_the_1024kb_cap(registry, entry_queue):
     """SPEC 15 / Appendix C defect 5: the cap is enforced before the network."""
     sender = RecordingSender(load_reply("uploadfile.reply.xml"))
     entry = registry.get("amd_patients_uploadfile")
-    from connector.worker import current_client
+    from gateway.worker import current_client
 
     oversized = base64.b64encode(b"x" * (1024 * 1024 + 1)).decode()
     token = current_client.set(

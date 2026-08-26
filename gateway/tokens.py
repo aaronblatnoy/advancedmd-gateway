@@ -41,8 +41,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from connector.interfaces import Caller, RegistryEntry
-from connector.queues import PRIORITY_BATCH, PRIORITY_INTERACTIVE, PRIORITY_NAMES
+from gateway.interfaces import Caller, RegistryEntry
+from gateway.queues import PRIORITY_BATCH, PRIORITY_INTERACTIVE, PRIORITY_NAMES
 
 __all__ = [
     "TOKEN_BYTES",
@@ -229,7 +229,7 @@ class TokenTable:
     def load(self) -> None:
         """Read the table from disk. Raises TokenError on a bad file.
 
-        A missing file is an error at startup (SPEC 16.1): the connector
+        A missing file is an error at startup (SPEC 16.1): the gateway
         must not come up with an empty, silently-deny-everything table.
         """
         try:
@@ -250,6 +250,17 @@ class TokenTable:
         except OSError:
             return None
 
+    def reload_due(self) -> bool:
+        """True when the next reload_if_changed() would touch the disk.
+
+        Free of I/O and of side effects, so an async caller can decide
+        whether it must move the reload into a worker thread (SPEC 4.4)
+        rather than paying a thread hop on every request.
+        """
+        if self._sighup:
+            return True
+        return (self._monotonic() - self._last_check) >= self._check_interval_s
+
     def reload_if_changed(self) -> bool:
         """SPEC 10.1. True when the table was actually replaced.
 
@@ -257,6 +268,8 @@ class TokenTable:
         check_interval_s, unless SIGHUP asked for an immediate re-read.
         A bad file on reload is ignored -- the last good table stays in
         force rather than the process losing every caller.
+
+        Does disk I/O, so an event-loop caller must run it in a thread.
         """
         now = self._monotonic()
         if not self._sighup and (now - self._last_check) < self._check_interval_s:
@@ -421,12 +434,12 @@ def _format_list(callers: Iterable[Caller]) -> str:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="connector", description="advancedmd-connector operator CLI"
+        prog="gateway", description="advancedmd-gateway operator CLI"
     )
     parser.add_argument(
         "--tokens-path",
         default=None,
-        help="token table JSON (default: CONNECTOR_TOKENS_PATH)",
+        help="token table JSON (default: GATEWAY_TOKENS_PATH)",
     )
     sub = parser.add_subparsers(dest="group", required=True)
     tokens = sub.add_parser("tokens", help="manage caller tokens")
@@ -454,14 +467,14 @@ def _split(value: str) -> tuple[str, ...]:
 
 
 def main(argv: Sequence[str] | None = None, *, stdout: Any = None) -> int:
-    """`connector tokens add|revoke|list` (SPEC 10.2)."""
+    """`gateway tokens add|revoke|list` (SPEC 10.2)."""
     out = stdout or sys.stdout
     parser = _build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    path = args.tokens_path or os.environ.get("CONNECTOR_TOKENS_PATH", "")
+    path = args.tokens_path or os.environ.get("GATEWAY_TOKENS_PATH", "")
     if not path:
-        print("CONNECTOR_TOKENS_PATH is not set and --tokens-path was not given",
+        print("GATEWAY_TOKENS_PATH is not set and --tokens-path was not given",
               file=sys.stderr)
         return 2
 

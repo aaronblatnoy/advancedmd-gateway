@@ -41,8 +41,13 @@ def _new_id() -> str:
 
 
 def _new_future() -> asyncio.Future:
-    """A slot bound to the running loop (SPEC 2: an empty result holder)."""
-    return asyncio.get_event_loop().create_future()
+    """A slot bound to the running loop (SPEC 2: an empty result holder).
+
+    get_running_loop, not get_event_loop: the slot must belong to the loop
+    that will await it, and on 3.12+ get_event_loop outside a running loop
+    is deprecated (3.13 raises once no loop is set for the thread).
+    """
+    return asyncio.get_running_loop().create_future()
 
 
 # --------------------------------------------------------------- records
