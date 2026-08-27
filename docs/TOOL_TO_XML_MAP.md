@@ -45,7 +45,7 @@ The 12 `knowledge/integrations/amd/meta/*.policy.data.json` files (getfieldsets,
 | `getchargedetaildata` | YES | `amd_billing_get_charge_detail_data` | class `demographics`. |
 | `getdatevisits` | YES | `amd_visits_get_date_visits` | Direct `client.call()`; does not use `client.get_visits_for_date` though the helper exists. |
 
-Result: all 9 checked actions have a tool. The only one that cannot perform its action at runtime is `uploadfile` (stub). If a backend workflow needs the unredacted, fully-parsed shape of these responses (e.g. the `VisitRecord` list from `get_visits_for_date` or the demographics bundle with insurance rows), note that the visits/reminder tools return counts and capped/flattened lists, not the typed-helper output.
+Result: all 9 checked actions have a tool. The only one that cannot perform its action at runtime is `uploadfile` (stub). Visits/reminder tools return counts and capped/flattened lists, not full typed-helper projections.
 
 ## 3. Stubs / not yet implemented (write-gated)
 
@@ -585,7 +585,7 @@ STUB / WRITE-GATED — no real AMD call performed. Would call action=`addehrprob
 - Tool args (handle() kwargs): `query: str` (required)
 - AMD request(s):
   - Call 1: action=`lookupzipcode`, class=not passed by the handler (same pattern).
-    - attrs: `name` <- fed by arg `query` (comment: docx Lookup Criteria table lines 5713-5723 mark both `name` and `code` as valid criteria; docx line 5772 says `name` represents City for zipcode lookups; handler always uses `name=` since Adam's query is free text)
+    - attrs: `name` <- fed by arg `query` (comment: docx Lookup Criteria table lines 5713-5723 mark both `name` and `code` as valid criteria; docx line 5772 says `name` represents City for zipcode lookups; handler always uses `name=` since the agent query is free text)
     - children: none
     - call count: 1x fixed
 - Returns: `capped_match_response()` envelope: `{query, count, matches (<=5, row_tag="zipcode", fields zipcode_id/zip(code or zip)/city(city or name)/state, sorted by zip then city), narrow_query}`; not raw XML passthrough.
@@ -611,7 +611,7 @@ STUB / WRITE-GATED — no real AMD call performed.
     - attrs: `include_inactive` <- fed by arg `include_inactive` (dropped from `call_kwargs` if `None` or `""`)
     - children: none
     - call count: 1x fixed
-- Returns: `{count: len(rows)}` only, where rows are extracted by tag `diagcode` (fallback tag `diagnosis` if empty) via `extract_rows_by_tag`; no `matches`/`raw` field at all — count-only per module docstring ("Adam should query specific codes via lookup_icd10, not enumerate the master file"). Not raw XML passthrough.
+- Returns: `{count: len(rows)}` only, where rows are extracted by tag `diagcode` (fallback tag `diagnosis` if empty) via `extract_rows_by_tag`; no `matches`/`raw` field at all — count-only per module docstring ("agents should query specific codes via lookup_icd10, not enumerate the master file"). Not raw XML passthrough.
 - Client method used: `client.call()` direct (via `safe_amd_call`)
 
 ### `amd_masterfiles_selectfacilities` (module: `selectfacilities.py`)
@@ -624,7 +624,7 @@ STUB / WRITE-GATED — no real AMD call performed.
     - attrs: `type` <- fed by arg `active_only`, translated on the wire: `"1"` if truthy else `"0"` (comment: AMD expects `type=0/1`, 0=all/1=active-only, per docx "Master File Requests / Selecting Facility File Templates"; promoted into scope by the 2026-06-04 auditor pair AUDIT-3)
     - children: none
     - call count: 1x fixed
-- Returns: `{active_only: bool(active_only), count: len(rows)}` only, rows extracted by tag `facility`; count-only, no enumeration (module docstring: "Master-file enumeration is not Adam's job"). Not raw XML passthrough.
+- Returns: `{active_only: bool(active_only), count: len(rows)}` only, rows extracted by tag `facility`; count-only, no enumeration (module docstring: "Master-file enumeration is not an agent's job"). Not raw XML passthrough.
 - Client method used: `client.call()` direct (via `safe_amd_call`)
 
 ### `amd_masterfiles_selectuserfiletemplates` (module: `selectuserfiletemplates.py`)
@@ -1055,7 +1055,7 @@ Each entry records the five checklist steps:
 
 1. **Request** - action, class, attribute names, children, and the
    reference implementation they were transcribed from.
-2. **Live check** - one operator call on black-sky returning
+2. **Live check** - one operator call on the production host returning
    `success="1"`, with the date and the AMD call count.
    **Every entry below is `PENDING OPERATOR`.** No process in this repo
    may contact AdvancedMD, so this step cannot be and has not been done.
@@ -1077,7 +1077,7 @@ asserts each handler's `XmlRequest` against.
 - Tool: `amd_patients_get_demographic` (alias `getdemographic`), patients
 - Request: action `getdemographic`, class `demographics`, attr `patientid`.
   No children. Source: `gateway/client_shim.get_patient_bundle`,
-  transcribed from all four backend vendored clients.
+  transcribed from reference AMD client shapes.
 - Live check: **PENDING OPERATOR**
 - Fixture: `tests/fixtures/getdemographic.reply.xml`
 - Result shape (Appendix B): `{"patient": <serialized reply tree>}` -
@@ -1100,7 +1100,7 @@ asserts each handler's `XmlRequest` against.
 - Request: action `getreminderappts`, class `api`, attrs `startdate`,
   `enddate`, `starttime` (`12:00 AM`), `endtime` (`11:59 PM`), `apptstatus`
   (default `0,1,2,3,5,10,11,12`), plus `patientid` when the caller passes
-  `patient_id`. No children. Source: appointment-validator's vendored
+  `patient_id`. No children. Source: a reference client's
   client; `apptstatus` is required by AMD's server despite the docs.
 - Live check: **PENDING OPERATOR**
 - Fixture: `tests/fixtures/getreminderappts.reply.xml`
@@ -1117,7 +1117,7 @@ asserts each handler's `XmlRequest` against.
 - Request: action `getdatevisits`, class `api`, attr `visitdate`
   (`M/D/YYYY`), children `<visit columnheading duration color apptstatus>`,
   `<patient name chart>`, `<insurance carname carcode>`. Source:
-  appointment-validator's vendored client. `providerid`/`provider`/
+  a reference client's client. `providerid`/`provider`/
   `facilityid`/`facility`/`reason`/`profile`/`profileid` are rejected as
   requested columns on this action and must NOT be re-added.
 - Live check: **PENDING OPERATOR**
@@ -1179,8 +1179,7 @@ asserts each handler's `XmlRequest` against.
   `<grouplist><group id="4" code="MISC" name="Miscellaneous">
   <categorylist><category id="25" filegroupfid="4" code="MIUNSP"
   name="Unspecified" .../></categorylist></group></grouplist>`, and a
-  `<filecontents>` child holding the base64 body. Source: patient-intake's
-  vendored client.
+  `<filecontents>` child holding the base64 body. Source: a reference client.
 - Live check: **PENDING OPERATOR**
 - Fixture: `tests/fixtures/uploadfile.reply.xml`
 - Result shape (Appendix B): `{patient_id, file_name, uploaded,
@@ -1202,7 +1201,7 @@ asserts each handler's `XmlRequest` against.
   `createdfrom`, `createdto`, `notedatefrom`, `notedateto` (all
   `M/D/YYYY`), children `<patientnote templatename notedatetime username
   signedbyuser>`, `<page pagename>`, `<field fieldname value>`. Source:
-  note-audit's vendored client (`fetch_note_raw`).
+  a reference client's .
 - Live check: **PENDING OPERATOR**
 - Fixture: `tests/fixtures/getehrnotes.reply.xml`
 - Result shape (Appendix B): `{patient_id, count, raw_xml}`. `patient_id`
@@ -1216,14 +1215,14 @@ asserts each handler's `XmlRequest` against.
   There is deliberately no raw-bytes side channel, no retained response
   buffer and no "last body" ContextVar anywhere: each would be a
   process-wide place an AMD body could live outside the record that asked
-  for it. The reference consumer does the same thing (note-audit's
-  `fetch_note_raw` builds a fresh `<PPMDResults>` wrapper and tostrings
+  for it. The reference consumer does the same thing (a caller's
+  callers may rebuild a fresh `<PPMDResults>` wrapper and tostrings
   it), so byte-fidelity to AMD's literal body is no consumer's
   requirement. Do not "fix" this into a raw-bytes path.
 - `raw_xml` content (D-R4-3): the FULL `<patientnotelist>` subtree, copied
   whole into a fresh `<PPMDResults><Results success="1"
   patientnotecount="N">` wrapper - every `patientnote`, `page` and `field`
-  in AMD's own spellings. Not a projection: note-audit date-filters and
+  in AMD's own spellings. Not a projection: the entitled caller date-filters and
   re-wraps on its side, and projecting here would reimplement the note
   parser inside the gateway. When AMD returns no notes the value is that
   same shell with `patientnotecount="0"` and an empty `<patientnotelist/>`,
@@ -1232,7 +1231,7 @@ asserts each handler's `XmlRequest` against.
 - `raw_xml` delivery: the handler NEVER inspects the token (D-R4-5). It
   always produces the key; `gateway/worker.py::_apply_result_policy` strips
   it (key omitted, plus the Redactor's `raw_xml_hash` sidecar) for anyone
-  lacking BOTH `phi` and `raw_xml`. note-audit is the only holder
+  lacking BOTH `phi` and `raw_xml`. the entitled caller is the only holder
   (SPEC 10.4). Pinned by
   `tests/integration/test_getehrnotes_raw_xml.py` and
   `tests/invariants/test_raw_xml_producer_gated.py`.
@@ -1245,7 +1244,7 @@ asserts each handler's `XmlRequest` against.
 - Defects fixed: Appendix C 1, for this tool only (Amendment D-3). The
   handler previously sent no `class_` and the Python-style attribute
   `patient_id`, so it raised `TypeError` before any XML was built.
-- Open item: note-audit also sends a practice-specific `templateid`
+- Open item: callers may send a practice-specific `templateid`
   filter. A practice constant does not belong in a shared tool, so it is
   omitted here. Whether AMD accepts the unfiltered form is exactly what
   the operator's live check has to establish.
@@ -1257,7 +1256,7 @@ asserts each handler's `XmlRequest` against.
   `pagenumber`, `filterhistory`, `typefilter`, `sortbypayment`,
   `groupbyvisit`, `sortdescending`, `profileid`, `getmemo`, plus
   `fromdate`/`todate` when supplied. No children. Class confirmed against
-  note-audit's vendored client (`fetch_charges`).
+  a reference client's (`fetch_charges`).
 - Live check: **PENDING OPERATOR**
 - Fixture: `tests/fixtures/gettxhistory.reply.xml`
 - Result shape (Appendix B): `{patient_id, page, count, by_provcode,
@@ -1271,7 +1270,7 @@ asserts each handler's `XmlRequest` against.
 - Tool: `amd_billing_get_charge_detail_data` (alias `getchargedetaildata`),
   billing
 - Request: action `getchargedetaildata`, class `demographics`, attr
-  `chargeid`. No children. Confirmed against note-audit's vendored client.
+  `chargeid`. No children. Confirmed against a reference client's.
 - Live check: **PENDING OPERATOR**
 - Fixture: `tests/fixtures/getchargedetaildata.reply.xml`
 - Result shape (Appendix B): `{charge_id, count, by_void, by_billins}`.
@@ -1281,7 +1280,7 @@ asserts each handler's `XmlRequest` against.
 ## Ledger open items
 
 - **SPEC 9.3 step 2 is PENDING OPERATOR for all nine tools.** Until the
-  operator runs each call on black-sky and records the date and call
+  operator runs each call on the production host and records the date and call
   count here, `verified: true` in this build means "request map, fixture,
   tier and Appendix C defects are done", not "AdvancedMD has answered it".
 - **Appendix C defect 1 is fixed only where it blocked an Appendix A tool**

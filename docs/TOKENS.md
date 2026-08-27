@@ -3,7 +3,7 @@
 Operator reference for `GATEWAY_TOKENS_PATH`. Nothing in this file is a
 real token: every value shown is a placeholder. Real plaintext tokens are
 printed once by `gateway tokens add` and exist only in the consuming
-app's Coolify environment.
+app's secret store.
 
 ## The table
 
@@ -12,9 +12,9 @@ are allowed during rotation.
 
 ```
 {"callers": [
-  {"name": "appointment-validator", "hash": "sha256:<64 hex chars>",
+  {"name": "my-app", "hash": "sha256:<64 hex chars>",
    "priority": "batch", "phi": true, "raw_xml": false, "may_write": [],
-   "tools": ["getreminderappts", "getdemographic", "getdatevisits"],
+   "tools": "*",
    "per_minute": null, "max_queue": 500,
    "created": "2026-08-20", "revoked": null}
 ]}
@@ -47,32 +47,26 @@ gateway tokens list
 `add` prints the plaintext once; it is never stored and never logged.
 `list` shows names and policy and never shows hashes.
 
-## Launch callers (SPEC 10.4)
+## Examples
 
-The commands that reproduce the launch table. Run them inside the
-gateway image with `GATEWAY_TOKENS_PATH` set.
+Issue whatever callers your org needs. Pattern only:
 
 ```
-gateway tokens add admin-console          --priority interactive --tools ""
-gateway tokens add chatbot                --priority interactive
-gateway tokens add agent-cursor           --priority interactive
-gateway tokens add agent-claude-code      --priority interactive
-gateway tokens add appointment-validator  --priority batch --phi \
-    --tools getreminderappts,getdemographic,getdatevisits
-gateway tokens add srt-auths              --priority batch --phi \
-    --tools getreminderappts,getdemographic,getupdatedvisits
-gateway tokens add note-audit             --priority batch --phi --raw-xml \
-    --tools getreminderappts,getehrnotes,gettxhistory,getchargedetaildata,getdemographic
-gateway tokens add patient-intake         --priority batch --phi \
-    --may-write uploadfile \
-    --tools lookuppatient,getdemographic,uploadfile
+gateway tokens add interactive-app --priority interactive --tools '*'
+gateway tokens add batch-job       --priority batch --phi --tools '*'
+gateway tokens add notes-raw       --priority batch --phi --raw-xml \
+    --tools getehrnotes
+gateway tokens add writer          --priority batch --phi \
+    --may-write uploadfile --tools lookuppatient,uploadfile
 ```
 
 Notes:
 
-- admin-console uses `/v1/login` only, so its tool allowlist is empty and
+- A token that only uses `/v1/login` can use an empty tools allowlist;
   every tool call it makes is denied by default.
-- patient-intake's `uploadfile` also needs the global gate
-  `WRITE_TOOLS_ENABLED=true`; `may_write` alone is not enough.
+- `uploadfile` also needs the global gate `WRITE_TOOLS_ENABLED=true`;
+  `may_write` alone is not enough.
 - The write gate and the allowlist are both default deny. A tool absent
   from `tools` is `tool_forbidden`, not a 404.
+- `--raw-xml` requires `--phi`. Sole producer today: `getehrnotes`.
+  Grant it only to callers that must receive AMD note XML.

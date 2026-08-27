@@ -45,7 +45,7 @@ Error (status per the table in section 14 below)
 
 ## 11.2 POST /v1/login
 
-Forwarded-credential check used by admin-console.
+Forwarded-credential check for staff apps (login gate / portal).
 
 ```json
 {"username": "…", "password": "…", "office_key": "…"}

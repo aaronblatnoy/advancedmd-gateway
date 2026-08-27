@@ -14,9 +14,8 @@ queues (SPEC 5), the token table and per-caller policy (SPEC 10), and the only
 tool surface any consumer may use (SPEC 9). That is a gateway.
 
 The rename is cheap right now and expensive later: the service has **never been
-dark-deployed on black-sky** (that is still PHASE A of
-`lifecycle/pending/plans/GATEWAY_REFACTOR_HARDENING_PLAN.txt`), there are no
-Coolify consumers, no issued tokens in production, and no Grafana dashboards.
+dark-deployed in production**, there are no orchestrator consumers, no issued
+tokens in production, and no Grafana dashboards.
 
 ## Decision
 
@@ -38,13 +37,8 @@ Renamed:
   `CONNECTOR_SERVE_PENDING_VERIFICATION` → `GATEWAY_SERVE_PENDING_VERIFICATION`
 - The three `Config` fields paired 1:1 with those vars (`connector_tokens_path`,
   `connector_port`, `connector_bind`)
-- Backend SDK class `AmdConnector` → `AmdGateway` in `lib/advancedmd_gateway`
-  (spec'd, not yet built — zero code depends on it)
-- Files: `docs/CONNECTOR_DECISIONS.md` → `docs/GATEWAY_DECISIONS.md`,
-  `CONNECTOR_REFACTOR_HARDENING_PLAN.txt` → `GATEWAY_REFACTOR_HARDENING_PLAN.txt`,
-  `.workflow/build-connector.js` → `.workflow/build-gateway.js`, and in the sibling
-  repo `ADVANCEDMD_CONNECTOR_MIGRATION_PLAN.txt` →
-  `ADVANCEDMD_GATEWAY_MIGRATION_PLAN.txt`
+- Suggested client class name `AmdGateway` (optional; consumer-side)
+- Files: `docs/CONNECTOR_DECISIONS.md` → `docs/GATEWAY_DECISIONS.md`, plan/file renames under `lifecycle/` and `.workflow/`
 - Prose across SPEC.md, README.md, CLAUDE.md, docs/, lifecycle/, plugin manifests
 
 Deliberately NOT renamed — these are declared contracts, not product naming:
@@ -59,13 +53,13 @@ Renaming those three groups is a follow-up that needs its own decision, because
 each one changes a published contract rather than a name. They are consistent
 with each other as they stand.
 
-Port `8820`, the tailnet-only publish `100.94.62.115:8820:8820`, and
+Port `8820`, the loopback/private publish `127.0.0.1:8820:8820`, and
 `replicas: 1` are untouched.
 
 ## Alternatives
 
 - **Keep `connector`.** Rejected: the name will be wrong for the life of the
-  service, and every consumer wired in SPEC 22 would inherit it.
+  service, and every future consumer would inherit it.
 - **Dual-name support (accept both env vars, alias the console script).**
   Rejected: compat shims exist to protect deployed consumers, and there are
   none. A shim here would be permanent dead weight plus a second code path in
@@ -86,10 +80,10 @@ Port `8820`, the tailnet-only publish `100.94.62.115:8820:8820`, and
 ## Operator follow-ups (NOT done here, by instruction)
 
 1. Rename the local workspace folder
-   `/Users/aaron_7nh0yzm/advancedmd-connector` → `advancedmd-gateway`. The
+   `<advancedmd-gateway-checkout>` → `advancedmd-gateway`. The
    filesystem path was deliberately left alone so the operator can move it and
    re-point tooling in one step.
 2. Rename the GitHub repository and update the git remote.
-3. Rename the Coolify project/app before the first dark deploy, so the
-   `advancedmd-connector` name never reaches black-sky.
+3. Rename the orchestrator project/app before the first dark deploy, so the
+   `advancedmd-connector` name never reaches a production deploy.
 4. Nothing is committed — the working tree carries this rename unstaged.

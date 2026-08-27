@@ -35,7 +35,7 @@ Legacy v1 policy files remain valid via `oneOf:[v1, v1.1]` on `$schema`.
 
 ## Why this is PROMOTED (not draft)
 
-Chatbot CLAUDE.md rule #4 says new knowledge is written as `.draft.`
+Agent CLAUDE.md rule #4 says new knowledge is written as `.draft.`
 This subtree is an exception: policy files are NOT free-form knowledge.
 They are dataclass configuration validated by a JSON schema and
 EXECUTED at runtime by per-domain MCP servers. Promoted-status reflects

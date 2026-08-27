@@ -8,5 +8,5 @@ consequences form.
 |---|---|
 | 2026-08-25 | [Rename advancedmd-connector to advancedmd-gateway](2026-08-25-rename-connector-to-gateway.md) — clean break, no compat shims; SPEC 14 error classes and SPEC 18.1 metric names deliberately kept |
 
-Locked cutover decisions that predate this folder live in
+Locked product decisions that predate this folder live in
 [`../../docs/GATEWAY_DECISIONS.md`](../../docs/GATEWAY_DECISIONS.md).

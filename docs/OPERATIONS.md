@@ -26,11 +26,12 @@ gateway [--tokens-path PATH] tokens list
   interactive) and the default `--max-queue` cap for that lane.
 - `--phi` marks the caller as PHI-eligible; without it, results returned
   to that caller are redacted per the token policy.
-- `--raw-xml` allows the `raw_xml` result path (used by note-audit's
-  `fetch_note_raw`). It is a second permission on top of `--phi`, not a
-  substitute for it: the worker delivers AMD's XML string only when the
-  token carries BOTH flags, and strips the key entirely otherwise. A
-  `--raw-xml` token issued without `--phi` gets no raw XML at all.
+- `--raw-xml` allows the `raw_xml` result path (for an EHR-notes
+  consumer that needs AMD's note body). It is a second permission on
+  top of `--phi`, not a substitute for it: the worker delivers AMD's
+  XML string only when the token carries BOTH flags, and strips the
+  key entirely otherwise. A `--raw-xml` token issued without `--phi`
+  gets no raw XML at all.
 - `--may-write` is a comma-separated tool list; a tool must appear here
   AND have `WRITE_TOOLS_ENABLED=true` set globally before a write call
   through it succeeds.
@@ -62,23 +63,19 @@ See docs/TOKENS.md for the token and policy data model in full.
 
 ## Deploy
 
-- Coolify project `advancedmd-gateway` on black-sky. One service, one
-  replica, port 8820 mapped on the host, reachable on the compose
-  network and the tailnet only — no public port.
+- One service, one replica, port 8820 mapped on the host to **loopback
+  or a private/VPN address only** — never a bare all-interfaces publish.
 - A persistent volume at `/data` holds `clock.json` and the token table.
-- AMD credentials and every other SPEC 19 variable come from the Coolify
-  environment; they exist only there, never in the image, the repo, or
+- AMD credentials and every other SPEC 19 variable come from the host
+  secret store; they exist only there, never in the image, the repo, or
   the logs.
 - Health check: `GET /health`, healthy when `status` is `ok` or
   `degraded` (degraded still serves requests), unhealthy only when the
   process is down.
-- Deploy method: a standard Coolify deploy from the repo. Avoid force
-  rebuilds during batch windows (see below) — a redeploy is not rolling
-  (one replica, by design; see the note on scaling below), so there is a
-  brief gap while the new process logs in.
-- The existing amd-mcp project and its nine containers on 8801-8809 are
-  not touched by this deploy and are not stopped until every consumer
-  has migrated (SPEC section 22).
+- Deploy method: whatever your orchestrator uses (Compose, Coolify,
+  etc.). Avoid force rebuilds during batch windows (see below) — a
+  redeploy is not rolling (one replica, by design), so there is a brief
+  gap while the new process logs in.
 - Never scale this service. The rate clock and the AMD session are
   process-wide singletons (SPEC 4.6, 4.7); a second replica is a second
   clock, and AdvancedMD bills per excess call across the office key
@@ -86,13 +83,8 @@ See docs/TOKENS.md for the token and policy data model in full.
 
 ## Rollback
 
-- Each backend consumer carries `AMD_TRANSPORT=legacy|gateway` during
-  migration (SPEC section 22). Rolling a consumer back is flipping that
-  variable back to `legacy`; its vendored AMD client is not deleted
-  until its migration step's gate has passed, so the rollback path
-  stays live throughout the migration.
-- Rolling the gateway itself back is a normal Coolify redeploy to the
-  previous image/version. Clock state persists across restarts
+- Rolling the gateway itself back is a normal redeploy to the previous
+  image/version. Clock state persists across restarts
   (`CLOCK_STATE_PATH`, decision D20); the session does not, so a
   rollback consumes one login-bucket slot on restart the same as any
   other restart.
@@ -109,7 +101,7 @@ See docs/TOKENS.md for the token and policy data model in full.
   5 minutes — means callers are saturating the cap; not itself an error,
   but worth watching.
 - p95 `connector_tool_wait_seconds{priority="interactive"}` > 10 s.
-- Any AMD 429 observed at all (should be zero after cutover).
+- Any AMD 429 observed at all (should stay at zero under a healthy clock).
 
 All of the above are readable directly from `GET /metrics` (Prometheus
 text, SPEC 18.1) or, for the clock and queue state, from `GET /health`.
@@ -119,25 +111,18 @@ text, SPEC 18.1) or, for the clock and queue state, from `GET /health`.
 The gateway runs no batch jobs of its own; it serializes whatever its
 batch-priority callers submit, aging a batch backlog into promotion
 after `BATCH_AGING_MS` (default 60 s) so it cannot starve interactive
-traffic (SPEC 5.3). The consumers currently scheduled against it, per
-the SPEC section 22 migration table, are:
-
-- appointment-validator — one nightly run.
-- srt-auths — a scan run and an event run.
-- note-audit — one daily run, including the `raw_xml` path.
-- patient-intake — dry runs, plus gated single uploads once migrated.
-
-Schedule deploys outside these windows: a restart drops the in-memory
-AMD session (clock state persists; the session does not — SPEC 16.3),
-so a deploy mid-batch-run costs the run one relogin's worth of delay
-rather than data loss, but it is avoidable.
+traffic (SPEC 5.3). Schedule deploys outside your own batch windows: a
+restart drops the in-memory AMD session (clock state persists; the
+session does not — SPEC 16.3), so a deploy mid-batch-run costs the run
+one relogin's worth of delay rather than data loss, but it is avoidable.
 
 ## Fixture procedure (SPEC 23.3)
 
 PHI must never enter an agent's context. Recording a new fixture is an
-**operator-only** action, run on black-sky:
+**operator-only** action, run on a host that already holds AMD
+credentials:
 
-1. The operator runs `scripts/record_fixture.py` on black-sky with real
+1. The operator runs `scripts/record_fixture.py` on that host with real
    AMD credentials, for one tool, against one synthetic or consented
    test patient.
 2. The script posts the request, saves the request XML as-is, and passes
@@ -169,9 +154,9 @@ on GET /v1/tools, and calling it returns `tool_unverified`.
 
 To promote one tool:
 
-1. On black-sky, run `scripts/record_fixture.py` for that tool against a
-   synthetic or consented test patient, and follow the fixture procedure
-   above (scrub, review on the box, commit).
+1. On the credentialed host, run `scripts/record_fixture.py` for that
+   tool against a synthetic or consented test patient, and follow the
+   fixture procedure above (scrub, review on the box, commit).
 2. Confirm the reply carried `success="1"`. Record the date and the AMD
    call count — no bodies — in that tool's ledger entry in
    `docs/TOOL_TO_XML_MAP.md` (`## verification-ledger-<action>`),

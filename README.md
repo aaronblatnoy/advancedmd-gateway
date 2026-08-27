@@ -1,24 +1,22 @@
 # advancedmd-gateway
 
-advancedmd-gateway is the **only process** in the organization that talks
-to AdvancedMD. Backend workflows, admin-console credential checks, and AI
+advancedmd-gateway is the **only process** that should talk to AdvancedMD
+for a given office key. Backend workflows, staff credential checks, and AI
 agents send it a tool call over HTTP or MCP and get a JSON result back. It
-holds the only AdvancedMD credentials, the only login session, and the
-only rate clock.
+holds the AdvancedMD credentials, the login session, and the rate clock.
 
-Fifteen processes used to log in and rate-limit independently against one
-office-key cap (overage bills $0.01/call; logins refuse faster than about
-once a minute). The gateway centralizes that: one process, one clock, one
-tool surface, unchanged tool names and result shapes for consumers.
+Without a gateway, every consumer logs in and rate-limits on its own
+against one office-key cap (overage bills $0.01/call; logins refuse faster
+than about once a minute). The gateway centralizes that: one process, one
+clock, one tool surface, with stable tool names and result shapes for
+callers.
 
 | | |
 |---|---|
-| **Repo** | https://github.com/aaronblatnoy/advancedmd-gateway |
 | **Contract** | [SPEC.md](SPEC.md) (wins on disagreement) |
 | **Decisions** | [docs/GATEWAY_DECISIONS.md](docs/GATEWAY_DECISIONS.md) |
 | **HTTP surface** | [docs/API.md](docs/API.md) |
 | **Ops** | [docs/OPERATIONS.md](docs/OPERATIONS.md) |
-| **Port map (black-sky)** | sibling `orlando-derm-backend/docs/PORTS.md` |
 
 ---
 
@@ -29,9 +27,9 @@ tool surface, unchanged tool names and result shapes for consumers.
 ```
   CONSUMERS (no AMD creds, no XML, no AMD URL)
   +------------------------------------------------------------------+
-  |  Workflows (validator, srt-auths, note-audit, intake, …)          |
-  |  admin-console  POST /v1/login (staff AMD check only)            |
-  |  Agents (Adam / Cursor / Claude) via MCP HTTP or stdio shim      |
+  |  Batch / interactive workflows                                   |
+  |  Staff apps via POST /v1/login (credential check only)           |
+  |  Agents (Cursor / Claude / chat) via MCP HTTP or stdio shim      |
   |                                                                  |
   |  Auth to gateway: Authorization: Bearer <per-app token>          |
   |  Env: ADVANCEDMD_GATEWAY_URL + ADVANCEDMD_GATEWAY_TOKEN          |
@@ -77,12 +75,12 @@ credential check and does not use them for the shared session.
 | `POST /v1/tools` | Run one tool; Bearer required | [docs/API.md](docs/API.md) |
 | `POST /v1/login` | Staff AMD credential check; Bearer required | same |
 | `GET /v1/tools` | Tool list filtered by token allowlist | same |
-| `GET /health` | Session, queues, clock — **no auth**; tailnet only | same |
-| `GET /metrics` | Prometheus text — **no auth**; tailnet only | SPEC 18 |
+| `GET /health` | Session, queues, clock — **no auth**; private network only | same |
+| `GET /metrics` | Prometheus text — **no auth**; private network only | SPEC 18 |
 | `/mcp/{patients,…,ehr,all}` | Streamable-HTTP MCP | SPEC 12 |
 | `gateway` CLI | Issue / revoke / list tokens | [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/TOKENS.md](docs/TOKENS.md) |
 | Env | `AMD_*`, `GATEWAY_*` | `.env.example`, SPEC 19 |
-| Host publish | `100.94.62.115:8820` (never bare `8820:8820`) | compose + PORTS.md |
+| Host publish | Explicit host IP or loopback (never bare `8820:8820`) | compose |
 
 ### Concurrency and fairness (non-negotiable)
 
@@ -96,19 +94,14 @@ credential check and does not use them for the shared session.
 - Rate clock is the office-key sliding window (SPEC 7). Login shares the
   clock as a high-priority tier-1 request.
 
-### Consumers (migration)
+### Typical callers
 
-| Caller | How it will talk | Priority | Notes |
+| Kind | How they talk | Priority | Notes |
 |---|---|---|---|
-| appointment-validator, srt-auths, note-audit, patient-intake | HTTP via planned `lib/advancedmd_gateway` | batch | `AMD_TRANSPORT=legacy\|gateway` during cutover |
-| admin-console | `POST /v1/login` + later tools as needed | interactive | First SPEC 22 flip |
-| chatbot / Adam | remote MCP | interactive | |
-| Cursor / Claude Code / Desktop | stdio shim `advancedmd-mcp` or plugin | interactive | PHI redacted unless token has `--phi` |
-
-Cutover order and gates: SPEC 22 and
-`orlando-derm-backend/lifecycle/pending/plans/ADVANCEDMD_GATEWAY_MIGRATION_PLAN.txt`.
-Gateway-side dark deploy / live checks:
-`lifecycle/pending/plans/GATEWAY_REFACTOR_HARDENING_PLAN.txt`.
+| Batch workflows | HTTP (`AmdGateway` SDK or raw JSON) | batch | Often `phi=true` |
+| Staff apps / login gate | `POST /v1/login` | interactive | Empty tools allowlist is fine |
+| Chat / agent hosts | remote MCP | interactive | Redacted unless token has `--phi` |
+| Workstation agents | stdio shim `advancedmd-mcp` or plugin | interactive | Same tool surface |
 
 ---
 
@@ -119,13 +112,13 @@ Gateway-side dark deploy / live checks:
 - Python 3.11+ (3.13 works; CI uses 3.11)
 - AdvancedMD office credentials (`AMD_USERNAME`, `AMD_PASSWORD`,
   `AMD_OFFICE_KEY`) — never commit them
-- For black-sky: Tailscale to `100.94.62.115`, Coolify access
-- Optional: Docker for compose
+- Optional: Docker for compose; a private network or VPN for production
+  publish
 
 ### 1. Local (laptop) — dark / bring-up
 
 ```bash
-git clone git@github.com:aaronblatnoy/advancedmd-gateway.git
+git clone <this-repo>
 cd advancedmd-gateway
 
 cp .env.example .env
@@ -169,18 +162,19 @@ python -m pytest tests -q
 python -m pytest tests/invariants -q
 ```
 
-### 2. Docker Compose (same machine / black-sky host)
+### 2. Docker Compose
 
 ```bash
-cp .env.example .env   # fill AMD_* 
+cp .env.example .env   # fill AMD_*
 docker compose up --build -d
-curl -s http://127.0.0.1:8820/health   # or http://100.94.62.115:8820/health
+curl -s http://127.0.0.1:8820/health
 ```
 
-Compose publishes **`100.94.62.115:8820:8820`** (tailnet address only). A
-bare `8820:8820` is forbidden — `/health` and `/metrics` have no auth
-(SPEC 17.4). Inside the container `GATEWAY_BIND=0.0.0.0`; the host
-mapping is what limits exposure.
+Compose defaults to **`127.0.0.1:8820:8820`**. For a production host, change
+the publish to your private/VPN address only (e.g.
+`10.x.x.x:8820:8820`). A bare `8820:8820` is forbidden — `/health` and
+`/metrics` have no auth (SPEC 17.4). Inside the container
+`GATEWAY_BIND=0.0.0.0`; the host mapping is what limits exposure.
 
 Issue tokens against the volume-mounted table (exec into the container
 or mount `GATEWAY_TOKENS_PATH` and use the CLI with matching path).
@@ -191,12 +185,13 @@ Revoke with immediate effect:
 gateway tokens revoke NAME && docker kill --signal=HUP advancedmd-gateway
 ```
 
-### 3. Coolify on black-sky (production posture)
+### 3. Production deploy (one replica)
 
-1. Create Coolify app **`advancedmd-gateway`** from
-   `https://github.com/aaronblatnoy/advancedmd-gateway` (`main`).
-2. **One replica only.** Do not enable horizontal scaling.
-3. Set environment (Coolify UI — never in git):
+Any orchestrator works (Docker Compose, Coolify, systemd+Docker, etc.).
+Rules that do not change:
+
+1. **One replica only.** Do not enable horizontal scaling.
+2. Set environment (secrets store — never in git):
 
    | Required | Notes |
    |---|---|
@@ -208,26 +203,21 @@ gateway tokens revoke NAME && docker kill --signal=HUP advancedmd-gateway
    | `WRITE_TOOLS_ENABLED` | `false` until deliberately opened |
    | `GATEWAY_SERVE_PENDING_VERIFICATION` | `false` in prod; `true` only to exercise before live checks |
 
-4. Persistent volume on `/data` (tokens + clock).
-5. Host port publish: **`100.94.62.115:8820:8820`** (same as compose).
-6. Healthcheck: `GET /health` → `ok` or `degraded`.
-7. After first boot: exec CLI, issue per-caller tokens (batch vs
-   interactive, `--phi` / `--raw-xml` only where SPEC 10.4 allows).
-8. Update sibling **`orlando-derm-backend/docs/PORTS.md`** if the
-   publish mapping changes (INV-PORTS).
-9. Watch `/health` for 24h before treating SPEC 22 step 0 as met; run
-   operator live checks (SPEC 9.3 / hardening plan R2) before flipping
-   consumers.
-
-Do **not** stop the nine amd-mcp containers until every consumer has
-cut over (SPEC 22 step 7).
+3. Persistent volume on `/data` (tokens + clock).
+4. Host port publish on **loopback or a private/VPN IP only** — never all
+   interfaces.
+5. Healthcheck: `GET /health` → `ok` or `degraded`.
+6. After first boot: issue per-caller tokens (batch vs interactive,
+   `--phi` / `--raw-xml` only where policy allows — SPEC 10).
+7. Watch `/health` for a soak period; run operator live checks
+   (SPEC 9.3) before putting real traffic on the gateway.
 
 ### 4. Attach an agent
 
 Tool names, schemas, and redacted shapes are identical across HTTP MCP,
 stdio shim, and the plugin (SPEC 12.1).
 
-**Remote MCP** (e.g. Adam on the compose network):
+**Remote MCP** (agent on the same private network):
 
 ```json
 {"mcpServers": {"amd-patients": {"type": "http",
@@ -244,7 +234,7 @@ Routes: `/mcp/patients`, `/mcp/visits`, `/mcp/providers`, `/mcp/codes`,
 ```json
 {"mcpServers": {"amd-patients": {"command": "uvx",
   "args": ["advancedmd-mcp", "--domain", "patients"],
-  "env": {"ADVANCEDMD_GATEWAY_URL": "http://100.94.62.115:8820",
+  "env": {"ADVANCEDMD_GATEWAY_URL": "http://127.0.0.1:8820",
           "ADVANCEDMD_GATEWAY_TOKEN": "<agent token>"}}}}
 ```
 
@@ -254,18 +244,17 @@ Routes: `/mcp/patients`, `/mcp/visits`, `/mcp/providers`, `/mcp/codes`,
 
 ### 5. Call from a backend workflow
 
-Planned SDK (cutover plan; package lands in
-`orlando-derm-backend/lib/advancedmd_gateway/`):
+Thin HTTP client (SPEC 13; lives in the consumer codebase, not here):
 
 ```python
 from lib.advancedmd_gateway import AmdGateway
 
 gateway = AmdGateway.from_env()  # ADVANCEDMD_GATEWAY_URL, ADVANCEDMD_GATEWAY_TOKEN
-bundle = await gateway.get_patient_bundle(patient_id)
 result = await gateway.tool("getdemographic", patient_id=patient_id)
+ok = await gateway.login_check(username, password, office_key)
 ```
 
-Until that library ships, call HTTP directly:
+Or call HTTP directly:
 
 ```bash
 curl -s -H "Authorization: Bearer $ADVANCEDMD_GATEWAY_TOKEN" \
@@ -274,24 +263,23 @@ curl -s -H "Authorization: Bearer $ADVANCEDMD_GATEWAY_TOKEN" \
   "$ADVANCEDMD_GATEWAY_URL/v1/tools"
 ```
 
-The SDK (and any raw HTTP client) holds **no** AMD credentials — HTTP
-only. Method table and exception mapping: SPEC 13.
+The client holds **no** AMD credentials — HTTP only. Exception mapping:
+SPEC 13.
 
 ### 6. Tokens (quick reference)
 
 ```bash
-gateway tokens add appointment-validator --priority batch --tools '*' --phi
-gateway tokens add note-audit --priority batch --tools '*' --phi --raw-xml
-gateway tokens add my-agent --priority interactive --tools getdemographic,lookuppatient
+gateway tokens add batch-job --priority batch --tools '*' --phi
+gateway tokens add my-agent  --priority interactive --tools getdemographic,lookuppatient
 gateway tokens list
 gateway tokens revoke my-agent
 # after revoke of a suspected leak:
 docker kill --signal=HUP advancedmd-gateway
 ```
 
-- `--phi` — results not redacted (workflows). Agents usually omit it.
-- `--raw-xml` — **requires** `--phi`; only note-audit is intended (D27 /
-  SPEC 10.4). Sole producer today: `getehrnotes`.
+- `--phi` — results not redacted (trusted workflows). Agents usually omit it.
+- `--raw-xml` — **requires** `--phi`; grants AMD note XML from `getehrnotes`
+  (D27 / SPEC 10). Grant only when needed.
 - Plaintext printed **once** at `add`.
 
 Full flags: [docs/OPERATIONS.md](docs/OPERATIONS.md). Model:
@@ -311,8 +299,8 @@ Full flags: [docs/OPERATIONS.md](docs/OPERATIONS.md). Model:
 ## Batch windows
 
 The gateway runs no cron of its own; it serializes callers. Avoid
-redeploys during appointment-validator nightly, srt-auths scans, and
-note-audit daily — restart drops the in-memory AMD session (SPEC 16.3).
+redeploys during heavy batch windows — restart drops the in-memory AMD
+session (SPEC 16.3).
 
 ## Further reading
 
@@ -321,5 +309,3 @@ note-audit daily — restart drops the in-memory AMD session (SPEC 16.3).
 - [docs/API.md](docs/API.md) — HTTP
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — deploy, rollback, fixtures
 - [docs/TOOL_TO_XML_MAP.md](docs/TOOL_TO_XML_MAP.md) — tool ↔ AMD XML ledger
-- [lifecycle/pending/plans/GATEWAY_REFACTOR_HARDENING_PLAN.txt](lifecycle/pending/plans/GATEWAY_REFACTOR_HARDENING_PLAN.txt)
-  — dark deploy + live-check gates

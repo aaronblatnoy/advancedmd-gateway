@@ -1,11 +1,9 @@
-# AMD Gateway Cutover: Locked Decisions
+# AMD Gateway: Locked Decisions
 
-Status: LOCKED 2026-08-20 (design conversation, pre-build). Supersedes
-amd-mcp-server-common/memory/decisions/2026-06-03-cross-process-rate-limit.md
-(which rejected a central daemon for v1).
+Status: LOCKED 2026-08-20 (design conversation, pre-build).
 
 ## D1. One process talks to AdvancedMD
-A new service, amd-advancedmd-gateway (service amd-dispatcher) (internal port 8820, same Coolify compose
+A new service, advancedmd-gateway (internal port 8820, same compose
 project), holds the single AMD login/session. No other container or backend
 service opens an AMD socket or holds AMD credentials.
 
@@ -43,24 +41,18 @@ on the caller side (one tool call per day, etc.) so each call re-enters the
 tool queue and interactive calls interleave. Existing tools that loop
 internally are flagged in docs/TOOL_TO_XML_MAP.md.
 
-## D6. Return shape: JSON dict, SDK converts to existing dataclasses
-advancedmd-gateway returns the handler's serialized dict. lib/advancedmd_gateway in
-orlando-derm-backend keeps the workflows' existing method names
-(get_patient_bundle, get_appointments_via_reminders, get_updated_visits,
-search_patients_by_name, uploadfile, get_chart_files) as thin wrappers that
-call the tool and build the same dataclasses (PatientBundle, VisitRecord)
-the workflows use today. Verified by field-by-field comparison against the
-vendored clients on saved AMD responses. note-audit's raw-note path uses a
-raw flag on its token.
+## D6. Return shape: JSON dict
+advancedmd-gateway returns the handler's serialized dict. Optional
+consumer SDKs may wrap `tool(...)` and build their own typed objects.
+An EHR-notes path that needs AMD note XML uses a `raw_xml` flag on its
+token (see D27).
 
 ## D7. One token per app; policy derives from the token
 ADVANCEDMD_GATEWAY_URL + ADVANCEDMD_GATEWAY_TOKEN per app. The token, not a field in
-the body, determines: caller identity, default priority (interactive:
-admin-console, chatbot; batch: validator, srt-auths, note-audit, intake),
-allow_phi (workflows yes, AI callers no), raw_xml (note-audit), and the
-write allowlist (uploadfile: intake only; default deny).
+the body, determines: caller identity, priority (interactive vs batch),
+allow_phi, raw_xml, and the write allowlist (default deny).
 
-## D8. admin-console login is a forwarded-credential check
+## D8. Staff login is a forwarded-credential check
 /v1/login accepts user-submitted credentials, performs a metered throwaway
 login (tier 1 via the clock), returns ok/not ok. It does not reuse or
 replace advancedmd-gateway's main session.
@@ -71,32 +63,27 @@ constructing AMDClient, and forward each tool call to advancedmd-gateway.
 
 ## D10. Gaps to close in Phase 1
 - lookuppatient has no tool; add a handler (patients domain).
-- uploadfile exists only as a write-gated stub in amd-mcp; patient-intake's
-  vendored implementation is the reference.
+- uploadfile exists only as a write-gated stub in amd-mcp; replace with
+  a real implementation during verification.
 
 ## Out of scope (unchanged)
 Python package renames; collapsing the 9 MCP ports; amd-portal-mcp
 (Playwright).
 
 ## D11. Name: advancedmd-gateway
-GitHub repo, Coolify app and local folder are renamed amd-mcp ->
-advancedmd-gateway (not amd-gateway). Backend library is
-lib/advancedmd_gateway/. Env vars are ADVANCEDMD_GATEWAY_URL and
-ADVANCEDMD_GATEWAY_TOKEN. The compose service is still amd-dispatcher and
-domain subfolders keep their amd-*-mcp names.
+GitHub repo, orchestrator app and local folder are renamed amd-mcp ->
+advancedmd-gateway (not amd-gateway). Env vars are ADVANCEDMD_GATEWAY_URL and
+ADVANCEDMD_GATEWAY_TOKEN. Domain subfolders keep their amd-*-mcp names.
 
 ## D12. Tool registry is verified-or-refused
 docs/TOOL_TO_XML_MAP.md (2026-08-20) shows many generated handlers call
 client.call without class_ and with non-AMD attribute names; they raise
 TypeError before reaching AMD. advancedmd-gateway registers every tool but only
 serves tools marked verified (proven action, class, attrs, templates); an
-unverified tool returns a clear "tool not verified" error. The backend's
-vendored clients are the reference XML for the 9 workflow actions
-(getreminderappts, getdemographic, getupdatedvisits, lookuppatient,
-uploadfile, getehrnotes, gettxhistory, getchargedetaildata, getdatevisits).
-Known defects to fix in Phase 1: getdemographic chart_number path,
-getmaster_patient patient_id attr name, missing class_ across ehr/
-masterfiles/system/providers/codes handlers.
+unverified tool returns a clear "tool not verified" error. Known defects
+to fix in Phase 1: getdemographic chart_number path, getmaster_patient
+patient_id attr name, missing class_ across ehr/masterfiles/system/
+providers/codes handlers.
 
 ## D13. Internal structure: two queues, two loops, slots all the way down
 Locked 2026-08-20 after walkthrough.
@@ -168,7 +155,7 @@ request fails with a clear error; never loop. Proactive refresh is deferred
 until the audit log shows 1025 landing on interactive calls.
 
 ## D16. New repository, amd-mcp untouched (supersedes Phase 0 rename and D11's rename clause)
-advancedmd-gateway is a new repo, new Coolify project, new local folder.
+advancedmd-gateway is a new repo, new orchestrator project, new local folder.
 amd-mcp and its nine containers on 8801-8809 are not modified; they keep
 serving until every consumer has moved, then they are stopped. The nine
 domain packages, policies, schemas, redaction, and write gate are copied
@@ -225,22 +212,22 @@ single lane owned.
   (lifecycle._AuditingMetrics): a value the SPEC 17.2 key set forbids in
   an audit line cannot reach a public /metrics label either.
 
-## D19. Tailnet-only transport (accepted risk)
-The gateway binds to the Docker compose network and the Tailscale
-interface only; it has no public port (SPEC 17.4). Transport inside the
-tailnet is WireGuard-encrypted by Tailscale, and version 1 adds no TLS
-termination on top of that. This is an accepted risk, not an oversight:
-the condition attached to accepting it is that the tailnet remains the
-only route to the gateway. If that ever stops being true — a public
-port is added, or the gateway becomes reachable from outside the
-tailnet by any other means — TLS termination inside the tailnet (SPEC
-25) is no longer deferrable and must be built before that route ships.
-/health and /metrics are unauthenticated but are covered by the same
-condition: their exposure is safe only because they are unreachable from
-outside the tailnet.
+## D19. Private-network transport (accepted risk)
+The gateway binds to a private address only (compose network, loopback,
+or VPN/private IP); it has no public all-interfaces publish (SPEC 17.4).
+Version 1 assumes that private path is already encrypted (e.g.
+WireGuard/VPN) and adds no TLS termination on top. This is an accepted
+risk, not an oversight: the condition attached to accepting it is that
+the private network remains the only route to the gateway. If that ever
+stops being true — a public port is added, or the gateway becomes
+reachable from the public internet by any other means — TLS termination
+(SPEC 25) is no longer deferrable and must be built before that route
+ships. `/health` and `/metrics` are unauthenticated but are covered by
+the same condition: their exposure is safe only because they are
+unreachable from the public internet.
 
 ## D20. The login-check cache (SPEC 8.7)
-/v1/login (the admin-console forwarded-credential check) shares the
+/v1/login (the staff forwarded-credential check) shares the
 gateway's 1-per-minute login bucket with the gateway's own session
 login, through a separate, throwaway AmdSession that never touches the
 gateway's session. Sharing the bucket means concurrent staff logins
@@ -430,16 +417,12 @@ blanking it. An unresolvable caller gets neither flag.
 That is the intended trap, not a misconfiguration to be papered over. And
 the gate is live, tested, and documented BEFORE any producer exists —
 which is the right order: the permission model is settled before the first
-byte can flow through it. The producer is PHASE R4a's job; per SPEC 10.4
-`note-audit` is the only intended `--raw-xml` holder.
+byte can flow through it.
 
 ## D27. getehrnotes is the one raw_xml producer (SPEC 17.1)
 
-`amd_ehr_getehrnotes` now always returns `result["raw_xml"]`, carrying
-AMD's note XML. It is the gateway's FIRST and ONLY raw-XML producer, and
-it exists because SPEC 13.3 promises note-audit's `fetch_note_raw` a
-string to read; until it landed that promise was unimplemented and the
-consumer plan's note-audit cutover could not start.
+`amd_ehr_getehrnotes` always returns `result["raw_xml"]`, carrying AMD's
+note XML. It is the gateway's FIRST and ONLY raw-XML producer.
 
 Raw XML is the one payload the redactor cannot help with — it is a whole
 AMD response body in AMD's own spellings — so the capability is fenced by
@@ -451,13 +434,10 @@ seven rules rather than by care:
    AMD body lives outside the record that asked for it.
 2. **Re-serialize, do not re-read the wire.** The string is built with
    `etree.tostring(..., encoding="unicode")` from the tree `send()`
-   already parsed. Legitimate because the reference consumer does exactly
-   that — note-audit's `fetch_note_raw` builds a fresh `<PPMDResults>`
-   wrapper around the matched `<patientnote>` and tostrings it — so
-   byte-fidelity to AMD's literal body is no consumer's requirement.
-3. **The full `<patientnotelist>` subtree, not a projection.** note-audit
-   date-filters and re-wraps on its side; projecting here would
-   reimplement the note parser inside the gateway. This is also why
+   already parsed. Byte-fidelity to AMD's literal body is not required.
+3. **The full `<patientnotelist>` subtree, not a projection.** Callers
+   that need filtering do it on their side; projecting here would
+   reimplement a note parser inside the gateway. This is also why
    `raw_xml` is right for THIS tool and wrong for `gettxhistory` and
    `getchargedetaildata`: those have a safe row projection, so they get
    one and are explicitly NOT approved for raw XML by this decision.
@@ -472,16 +452,16 @@ seven rules rather than by care:
 6. **Nothing new logs, persists, meters or errors on the string.** The
    audit key set is closed (SPEC 17.2), metrics label values are closed
    (SPEC 18.1), and the log filter redacts long values and `result`/`args`
-   keys (SPEC 17.3). All three were previously only tested against a fake
-   handler; they are now tested with the real producer's output.
-7. **One holder.** note-audit is the only `--raw-xml` token (SPEC 10.4).
-   A second holder is a policy change needing its own compliance pass.
+   keys (SPEC 17.3).
+7. **Entitlement is policy.** Grant `--raw-xml` only to callers that must
+   receive AMD note bodies. A second entitlement is fine; it is a token
+   change, not a code change.
 
 Empty-note semantics (Q-5) are resolved in favour of an empty
 `<PPMDResults><Results patientnotecount="0"><patientnotelist/>` shell
 rather than a missing key: absence of `raw_xml` then means exactly one
-thing — the caller is not entitled — and note-audit can distinguish that
-from "this patient has no notes".
+thing — the caller is not entitled — and an entitled caller can
+distinguish that from "this patient has no notes".
 
 One supporting change in `domains/`: `amd_ehr_mcp/handlers/_common.py`
 gained `safe_amd_call_element_async`, returning `(element, raw_dict,
@@ -494,10 +474,9 @@ re-frozen in the same change (CLAUDE.md's never-modify-`domains/`-without
 
 Rollback has two levels. Code: revert the handler change — the gate, the
 tests and the token flag all pre-date it and stay. Policy: re-issue
-note-audit's token without `--raw-xml` and SIGHUP, which leaves the
-producer in place with nobody entitled to its output. The second is
-strictly safe and needs no redeploy.
+tokens without `--raw-xml` and SIGHUP, which leaves the producer in place
+with nobody entitled to its output. The second is strictly safe and needs
+no redeploy.
 
-Deliberately NOT decided here: `templateid`. note-audit also sends a
-practice-specific template filter that this handler omits; that is GAP-17
-and belongs to the consumer plan's C4, not to a shared tool.
+Deliberately NOT decided here: practice-specific `templateid` filters.
+Those belong on the caller if needed, not on the shared tool.

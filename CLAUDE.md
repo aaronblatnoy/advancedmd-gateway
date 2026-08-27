@@ -36,7 +36,7 @@ plugin/               the Claude Code plugin (SPEC 12.4)
 tests/
   unit/ integration/ invariants/ fixtures/ load/
 .github/workflows/ci.yml    runs the full suite incl. tests/invariants (SPEC 23.6)
-scripts/record_fixture.py   operator-run only, on black-sky, never by an agent (SPEC 23.3)
+scripts/record_fixture.py   operator-run only, on a credentialed host, never by an agent (SPEC 23.3)
 docs/                  this documentation set
 memory/decisions/      dated decision records; INDEX.md is the newest-first index
 lifecycle/             brainstorms -> pending/plans -> archive/plans (see lifecycle/README.md)

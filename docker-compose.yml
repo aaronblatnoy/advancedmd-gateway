@@ -13,11 +13,11 @@ services:
     deploy:
       replicas: 1
     ports:
-      # Published on the tailnet address ONLY. A bare "8820:8820" would
-      # bind 0.0.0.0 on the host and expose the unauthenticated /health
-      # and /metrics endpoints on every interface (SPEC 17.4). Use
-      # 127.0.0.1:8820:8820 instead if a reverse proxy fronts it.
-      - "100.94.62.115:8820:8820"
+      # Published on loopback by default. A bare "8820:8820" would bind
+      # 0.0.0.0 on the host and expose the unauthenticated /health and
+      # /metrics endpoints on every interface (SPEC 17.4). For a
+      # production host, replace 127.0.0.1 with a private/VPN address.
+      - "127.0.0.1:8820:8820"
     environment:
       AMD_USERNAME: ${AMD_USERNAME:?set AMD_USERNAME}
       AMD_PASSWORD: ${AMD_PASSWORD:?set AMD_PASSWORD}

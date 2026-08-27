@@ -1,7 +1,7 @@
 ---
 id: amd-integration-payments-readme
 title: AMD MCP payments domain — per-action policy subtree
-access: [chatbot, amd-mcp-server]
+access: [agents, amd-mcp-server]
 authority: practice
 source: amd-mcp-server-common/READONLY_COMPLETION_PLAN.txt C5
 last_updated: 2026-06-03

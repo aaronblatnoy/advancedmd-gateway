@@ -1,7 +1,7 @@
 ---
 id: integrations-amd-billing-subtree
 title: AMD Billing Integration Policies (DRAFT)
-access: ["chatbot", "amd-mcp-server"]
+access: ["agents", "amd-mcp-server"]
 authority: practice
 source: "Aaron's policy decisions + AMD doc extract (runtime/cache/amd-doc-extract.md) + master plan READONLY_COMPLETION_PLAN.txt"
 last_updated: "2026-06-03"
@@ -150,7 +150,7 @@ equivalents):**
 AMD's `gettxhistory` action returns charges + payments + write-offs
 in a single envelope and is owned by **`amd-payments-mcp`** (built in
 parallel under C5). Billing-domain consumers needing patient-scoped
-charge lists reach for `amd_payments_get_tx_history` via the chatbot's
+charge lists reach for `amd_payments_get_tx_history` via the chat agent's
 multiplex. This avoids duplicating an action across domains in the
 catalog (a foundation invariant) while keeping the financial
 transaction stream addressable.

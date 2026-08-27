@@ -57,7 +57,7 @@ Authoritative schema: `amd-mcp-server-common/policy.schema.json`.
 - `domain` (string, required): One of patients, visits, providers,
   billing, payments, codes.
 - `tier` (integer, required): 1, 2, or 3 — AMD rate-limit tier.
-- `tool_name` (string, required): The MCP tool name exposed to Adam.
+- `tool_name` (string, required): The MCP tool name exposed to agents.
   Convention: `amd_<domain>_<action>` lowercase with underscores.
 - `redact.phi_fields` (array): Field names whose values are PHI and
   must be redacted by default.
