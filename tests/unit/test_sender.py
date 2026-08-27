@@ -162,6 +162,15 @@ def test_fault_of_returns_none_on_success():
     assert fault_of(synthetic_reply()) is None
 
 
+def test_fault_of_returns_none_when_success_attr_is_omitted():
+    # Live getdatevisits replies set visitcount and omit @success.
+    body = (
+        b'<PPMDResults><Results servertime="2026-08-26T20:44:37.310" '
+        b'visitcount="2"><visitlist/></Results></PPMDResults>'
+    )
+    assert fault_of(parse_reply(body)) is None
+
+
 def test_fault_of_reads_the_reference_client_fault_shape():
     tree = parse_reply(fault_body("1025"))
     assert fault_of(tree) == ("1025", "Session has timed out")

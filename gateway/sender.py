@@ -150,16 +150,22 @@ def parse_reply(payload: bytes) -> Element:
 def fault_of(tree: Element) -> tuple[str | None, str | None] | None:
     """AMD's fault for this reply, or None when it succeeded. SPEC 6.4.
 
-    Success is Results/@success == "1". Faults are read from
-    Error/Fault/detail (code, description), which is the shape every
-    reference client parses; the flatter Error/@Code form is accepted too
-    so a reply that uses it is still described rather than swallowed.
+    Failure on Results is only ``success="0"``. Some AMD actions (notably
+    getdatevisits) omit ``@success`` entirely on a good reply and only
+    set payload attrs like ``visitcount`` — matching the reference
+    clients, a missing or non-``0`` success is treated as success.
+    Faults are read from Error/Fault/detail (code, description), which is
+    the shape every reference client parses; the flatter Error/@Code form
+    is accepted too so a reply that uses it is still described rather
+    than swallowed.
 
     Returns (code, description). Only those two values ever leave this
     function: never an element, never a body (SPEC 17.1).
     """
     results = tree.find("Results")
-    if results is not None and results.get("success") == "1":
+    # Reference clients: `results is None or success == "0"` is failure.
+    # success="1" and omitted @success are both success.
+    if results is not None and results.get("success") != "0":
         return None
 
     detail = tree.find(".//Error/Fault/detail")
