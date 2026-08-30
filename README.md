@@ -17,6 +17,7 @@ callers.
 | **Decisions** | [docs/GATEWAY_DECISIONS.md](docs/GATEWAY_DECISIONS.md) |
 | **HTTP surface** | [docs/API.md](docs/API.md) |
 | **Ops** | [docs/OPERATIONS.md](docs/OPERATIONS.md) |
+| **Live deployments** | [docs/DEPLOYMENTS.md](docs/DEPLOYMENTS.md) |
 
 ---
 
