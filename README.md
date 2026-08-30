@@ -16,6 +16,7 @@ callers.
 | **Contract** | [SPEC.md](SPEC.md) (wins on disagreement) |
 | **Decisions** | [docs/GATEWAY_DECISIONS.md](docs/GATEWAY_DECISIONS.md) |
 | **HTTP surface** | [docs/API.md](docs/API.md) |
+| **Tool reference** | [docs/TOOLS.md](docs/TOOLS.md) (per-tool args and result shapes) |
 | **Ops** | [docs/OPERATIONS.md](docs/OPERATIONS.md) |
 | **Live deployments** | [docs/DEPLOYMENTS.md](docs/DEPLOYMENTS.md) |
 
@@ -308,5 +309,6 @@ session (SPEC 16.3).
 - [SPEC.md](SPEC.md) — build contract
 - [docs/GATEWAY_DECISIONS.md](docs/GATEWAY_DECISIONS.md) — why
 - [docs/API.md](docs/API.md) — HTTP
+- [docs/TOOLS.md](docs/TOOLS.md) — per-tool consumer reference: args, result shapes, examples
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — deploy, rollback, fixtures
 - [docs/TOOL_TO_XML_MAP.md](docs/TOOL_TO_XML_MAP.md) — tool ↔ AMD XML ledger

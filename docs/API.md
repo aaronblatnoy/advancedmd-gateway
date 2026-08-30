@@ -7,6 +7,11 @@ All endpoints except `/health` and `/metrics` require
 `Authorization: Bearer <token>`. Request and response bodies are JSON,
 UTF-8.
 
+For what each tool does, what arguments it takes, and the exact JSON keys
+it returns, see [TOOLS.md](TOOLS.md) — the per-tool consumer reference.
+This file documents the envelope around those results, not the results
+themselves.
+
 ## 11.1 POST /v1/tools
 
 Request
