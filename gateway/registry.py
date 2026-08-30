@@ -234,6 +234,10 @@ def _entry_from_spec(
         verified_at=row.verified_at if row is not None else None,
         verification_ref=row.verification_ref if row is not None else None,
         aliases=(row.alias,) if row is not None and row.alias != name else (),
+        # The factory pops `description` off the input schema and onto
+        # the Tool, so it is not recoverable from `schema` downstream.
+        # Carry it explicitly or GET /v1/tools serves an empty string.
+        description=str(getattr(spec.tool, "description", "") or ""),
     )
 
 

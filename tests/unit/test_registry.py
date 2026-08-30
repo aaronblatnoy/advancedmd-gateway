@@ -148,6 +148,41 @@ def test_unverified_tools_are_still_listed(registry):
     assert all(e.checklist is None for e in no_row)
 
 
+def test_every_entry_carries_its_tool_description(registry):
+    """The description the factory lifted off the generated schema must
+    survive onto the entry, or GET /v1/tools serves an empty string.
+
+    The factory pops `description` OFF the input schema and onto the mcp
+    Tool, so it is not recoverable from `entry.schema` downstream -- the
+    registry has to carry it explicitly. Asserted for every tool, not a
+    sample, because a silently-blank description is invisible in prod.
+    """
+    blank = [e.name for e in registry if not e.description.strip()]
+    assert blank == []
+    assert all("description" not in e.schema for e in registry)
+
+    date_visits = registry.get("amd_visits_get_date_visits")
+    assert date_visits.description.startswith("List office visits")
+
+
+def test_tool_row_serves_a_non_empty_description(registry):
+    """SPEC 11.3: the row GET /v1/tools returns is the consumer's only
+    view of what a tool does. It must not be blank."""
+    from gateway.mcp_surface import mcp_tool_from_entry, tool_row
+
+    entry = registry.get("amd_codes_lookup_icd10")
+    row = tool_row(entry)
+    assert row["description"] == entry.description
+    assert "ICD-10" in row["description"]
+
+    # SPEC 12.2: the MCP entry is the same text plus the unverified
+    # marker -- never the marker on its own.
+    mcp = mcp_tool_from_entry(entry)
+    assert mcp["description"] == f"{entry.description} (unverified)"
+
+    assert all(tool_row(e)["description"] for e in registry)
+
+
 def test_verified_at_stays_none_while_the_live_check_is_pending():
     """SPEC 9.3 step 2 belongs to the operator; nothing here may claim it."""
     table = VerificationTable()

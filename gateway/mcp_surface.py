@@ -254,7 +254,10 @@ def tool_row(entry: RegistryEntry) -> dict[str, Any]:
         "write": bool(entry.write_action),
         "tier": entry.tier,
         "schema": schema,
-        "description": schema.get("description", ""),
+        # The entry carries the description the factory lifted off the
+        # input schema; the schema fallback keeps hand-built entries and
+        # fixtures (which never went through the factory) working.
+        "description": entry.description or schema.get("description", ""),
     }
 
 

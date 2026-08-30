@@ -256,6 +256,13 @@ class RegistryEntry:
     #: The SPEC 9.3 checklist as reported by GET /v1/tools, or None for a
     #: tool with no ledger row at all.
     checklist: Mapping[str, str] | None = None
+    #: The consumer-facing tool description served by GET /v1/tools and
+    #: MCP tools/list. Sourced from the generated JSON Schema's top-level
+    #: `description`, which each domain `_factory.py` pops OFF the input
+    #: schema and onto the mcp Tool -- which is why it cannot simply be
+    #: read back off `schema` here. Appended last so positional
+    #: construction of this dataclass keeps working.
+    description: str = ""
 
     @property
     def is_served(self) -> bool:
