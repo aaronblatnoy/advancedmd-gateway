@@ -46,7 +46,7 @@ ARGS: dict[str, dict[str, Any]] = {
         "start_date": "2026-06-01", "end_date": "2026-06-01",
     },
     "amd_visits_get_date_visits": {"date": "2026-06-01"},
-    "amd_visits_get_updated_visits": {"since": "2026-06-01", "limit": 100},
+    "amd_visits_get_updated_visits": {"datechanged": "2026-06-01T00:00:00.000"},
     "amd_patients_lookup_patient": {"query": "ALPHA"},
     "amd_patients_uploadfile": {
         "patient_id": "900001",
@@ -240,7 +240,7 @@ async def test_getupdatedvisits_result_shape(registry, entry_queue):
     )
 
     assert set(result) == {
-        "since", "limit", "count", "by_provider", "by_provider_id",
+        "datechanged", "servertime", "count", "by_provider", "by_provider_id",
         "by_facility", "by_facility_id", "by_apptstatus", "visits",
     }
     assert result["count"] == 2
@@ -251,7 +251,7 @@ async def test_getupdatedvisits_result_shape(registry, entry_queue):
 async def test_lookuppatient_result_shape(registry, entry_queue):
     result, _s, _l = await run_tool(registry, "amd_patients_lookup_patient", entry_queue)
 
-    assert set(result) == {"query", "page", "count", "matches", "narrow_query"}
+    assert set(result) == {"query", "page", "exactmatch", "count", "matches", "narrow_query"}
     assert result["count"] == 2
     assert result["narrow_query"] is False
     assert set(result["matches"][0]) == {

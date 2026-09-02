@@ -71,29 +71,25 @@ def _sort_key(m: dict[str, str]) -> tuple[str, str, str]:
     )
 
 
-async def handle(*, query: str, page: int = 1) -> dict[str, Any]:
-    """Search patients by name/chart with optional paged enumeration.
-
-    `page` is AARON-REVIEWABLE-2 (DUO-11 default): extend in-place
-    rather than ship a second tool. AMD's lookup endpoint accepts a
-    page parameter; we forward it when >1, otherwise omit so existing
-    callers see no behavioral change.
-    """
+async def handle(
+    *,
+    query: str = "",
+    page: int = 1,
+    exactmatch: bool = False,
+    last: str = "",
+    first: str = "",
+) -> dict[str, Any]:
+    """Search patients by name/chart with optional paged enumeration."""
+    if not query and (last or first):
+        query = f"{last.upper()},{first.upper()}".strip(",")
     if not query:
         return {"error": "bad_input", "details": {"reason": "query required"}}
     client = get_client()
-    # Live verification 2026-06-04: action="lookuppatient", class_="api",
-    # name=<query> returns 10 matches on the production office key.
-    # The legacy `action="lookup", class_="patient", search=` pattern
-    # (and the intermediate `search=` rewrite from earlier today) BOTH
-    # fail with "PPMD_patient.patient instance" errors against the same
-    # office key — the docx-canonical action name is the only one that
-    # actually works. See knowledge/integrations/amd/patients/
-    # lookup-patient.policy.data.json (Adam-facing) for the schema
-    # contract.
-    call_kwargs = {"class_": "api", "name": query}
+    call_kwargs: dict[str, Any] = {"class_": "api", "name": query}
     if page and page > 1:
-        call_kwargs["page"] = page
+        call_kwargs["page"] = str(page)
+    if exactmatch:
+        call_kwargs["exactmatch"] = "1"
     raw_dict, err = await safe_amd_call_async(
         client, action="lookuppatient", raw_to_dict_fn=raw_to_dict,
         **call_kwargs,
@@ -103,16 +99,12 @@ async def handle(*, query: str, page: int = 1) -> dict[str, Any]:
     raw_rows = extract_rows_by_tag(raw_dict, "patient")
     matches = [_flatten_match(r) for r in raw_rows]
     matches.sort(key=_sort_key)
-    # Cap matches at 5. If AMD returned more, set `narrow_query` so Adam
-    # tells the user to refine, not try to enumerate. Aaron 2026-06-04:
-    # "it cannot do any math or aggregations properly." The handler is
-    # the source of truth for `count`; Adam reads it verbatim.
-    _MATCH_CAP = 5
     total = len(matches)
     return {
         "query": query,
         "page": page,
+        "exactmatch": bool(exactmatch),
         "count": total,
-        "matches": matches[:_MATCH_CAP],
-        "narrow_query": total > _MATCH_CAP,
+        "matches": matches,
+        "narrow_query": total > 50,
     }

@@ -38,8 +38,8 @@
     "alias": "getupdatedvisits",
     "action": "getupdatedvisits",
     "class": "api",
-    "attrs": ["since", "limit"],
-    "children": [],
+    "attrs": ["datechanged"],
+    "children": ["visit", "patient", "insurance"],
     "reply_fixture": "getupdatedvisits.reply.xml"
   },
   "amd_patients_lookup_patient": {

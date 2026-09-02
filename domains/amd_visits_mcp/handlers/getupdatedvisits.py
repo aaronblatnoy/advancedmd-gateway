@@ -1,27 +1,13 @@
 """amd_visits_get_updated_visits - AMD getupdatedvisits action.
 
 Doc source: knowledge/reference/amd_api/visits/getupdatedvisits.md
-Visits updated since a timestamp (delta-sync friendly).
-
-Returns ONLY pre-computed cardinality + group-bys (Aaron 2026-06-04:
-"it cannot do any math or aggregations properly"):
-- ``count``: total number of visits (so the LLM never has to count).
-- ``by_provider``: ``{provider_name: count}`` so "how many for X?" is a
-  dict lookup, not a head-filter.
-- ``by_facility``: ``{facility_name: count}``.
-- ``by_apptstatus``: ``{apptstatus: count}`` — the natural status
-  dimension for a delta-sync feed.
-
-Sort key (primary): ``lastupdated`` desc when present (newest first is
-the natural delta-sync ordering); falls back to ``starttime`` then
-``visit_id``. The ``getupdatedvisits`` AMD doc lists ``lastupdated``
-as the canonical attribute on each row; mirror that ordering so
-consumers can read the head of the list as "freshest updates first".
+Visits updated since a checkpoint (``datechanged`` = prior ``servertime``).
 """
 from __future__ import annotations
 
 from typing import Any
 
+from lxml import etree
 
 from ._common import get_client, raw_to_dict, safe_amd_call_async, summarize_by
 
@@ -32,14 +18,26 @@ TIER = 2
 PERMITTED_ACTIONS = ("getupdatedvisits",)
 
 
-def _extract_visits(raw_dict: Any) -> list[dict[str, str]]:
-    """Walk the raw_to_dict tree and pull <visit> child elements out.
+def _template_children() -> list:
+    return [
+        etree.Element(
+            "visit",
+            columnheading="ColumnHeading",
+            duration="Duration",
+            color="Color",
+            apptstatus="ApptStatus",
+            profile="Profile",
+            profileid="ProfileId",
+            providerid="ProviderId",
+            provider="Provider",
+            reason="Reason",
+        ),
+        etree.Element("patient", name="Name", chart="Chart"),
+        etree.Element("insurance", carname="CarName", carcode="CarCode"),
+    ]
 
-    Each visit becomes a flat dict of its attributes plus a nested
-    ``patient`` dict for the patient child if present. Mirrors
-    ``getdatevisits._extract_visits`` shape with the additional
-    ``lastupdated`` field unique to the updated-feed.
-    """
+
+def _extract_visits(raw_dict: Any) -> list[dict[str, str]]:
     out: list[dict[str, Any]] = []
     if not isinstance(raw_dict, dict):
         return out
@@ -49,25 +47,36 @@ def _extract_visits(raw_dict: Any) -> list[dict[str, str]]:
             return
         if node.get("_tag") == "visit":
             attrs = dict(node.get("_attrs") or {})
+            updatestatus = (attrs.get("updatestatus") or "").strip()
+            if updatestatus.upper() == "D":
+                return
             pat_attrs: dict[str, str] = {}
-            children = node.get("_children") or []
+            primary_code: str | None = None
+            primary_name: str | None = None
             child_text: dict[str, str] = {}
-            for child in children:
+            for child in node.get("_children") or []:
                 if not isinstance(child, dict):
                     continue
-                if child.get("_tag") == "patient":
+                tag = child.get("_tag")
+                if tag == "patient":
                     pat_attrs = dict(child.get("_attrs") or {})
                     continue
-                tag = child.get("_tag")
+                if tag == "insurance":
+                    ins = dict(child.get("_attrs") or {})
+                    seq = (ins.get("seqnum") or "").strip()
+                    if primary_code is None or seq in ("", "1"):
+                        primary_code = (ins.get("carcode") or "").strip() or None
+                        primary_name = (ins.get("carname") or "").strip() or None
+                    continue
                 text = child.get("_text")
                 if tag and text:
                     child_text[tag] = text
-            # Tolerant of both attr-style ("provider="...") and
-            # child-element-style (<provider_id>...</provider_id>) shapes.
             out.append({
                 "visit_id": attrs.get("id", "") or attrs.get("appointment_id", ""),
+                "date": attrs.get("date", ""),
                 "starttime": attrs.get("starttime", "") or attrs.get("appointment_datetime", ""),
                 "lastupdated": attrs.get("lastupdated", "") or attrs.get("dtlast", ""),
+                "updatestatus": updatestatus,
                 "duration": attrs.get("duration", ""),
                 "apptstatus": attrs.get("apptstatus", "") or attrs.get("status", ""),
                 "provider_id": attrs.get("providerid", "") or child_text.get("provider_id", ""),
@@ -80,6 +89,8 @@ def _extract_visits(raw_dict: Any) -> list[dict[str, str]]:
                 "patient_id": pat_attrs.get("id", "") or child_text.get("patient_id", ""),
                 "patient_name": pat_attrs.get("name", ""),
                 "chart_number": pat_attrs.get("chart", ""),
+                "primary_insurance_carrier_code": primary_code,
+                "primary_insurance_carrier_name": primary_name,
             })
             return
         for child in node.get("_children") or []:
@@ -89,12 +100,19 @@ def _extract_visits(raw_dict: Any) -> list[dict[str, str]]:
     return out
 
 
+def _results_node(raw_dict: Any) -> dict[str, Any] | None:
+    if not isinstance(raw_dict, dict):
+        return None
+    if raw_dict.get("_tag") == "Results":
+        return raw_dict
+    for child in raw_dict.get("_children") or []:
+        found = _results_node(child)
+        if found is not None:
+            return found
+    return None
+
+
 def _sort_key(v: dict[str, str]) -> tuple[str, str, str]:
-    # lastupdated DESC is the natural delta-sync ordering. Python sort
-    # is ascending by default — invert via negation-of-ord trick: we
-    # sort the negated string by returning lastupdated under a "high
-    # first" reflection. Simpler: just sort ascending and reverse the
-    # list at the call site. Use ascending key here.
     vid = v.get("visit_id") or ""
     try:
         vid_part = (f"{int(vid):020d}",)[0]
@@ -107,24 +125,36 @@ def _sort_key(v: dict[str, str]) -> tuple[str, str, str]:
     )
 
 
-async def handle(*, since: str, limit: int = 100) -> dict[str, Any]:
-    if not since:
-        return {"error": "bad_input", "details": {"reason": "since required"}}
+async def handle(
+    *,
+    datechanged: str = "",
+    since: str = "",
+) -> dict[str, Any]:
+    """Fetch visits changed since ``datechanged`` (alias: ``since``)."""
+    checkpoint = (datechanged or since or "").strip()
+    if not checkpoint:
+        return {"error": "bad_input", "details": {"reason": "datechanged required"}}
     client = get_client()
     raw_dict, err = await safe_amd_call_async(
-        client, action=ACTION, raw_to_dict_fn=raw_to_dict,
-        class_="api", since=since, limit=str(limit),
+        client,
+        action=ACTION,
+        raw_to_dict_fn=raw_to_dict,
+        class_="api",
+        datechanged=checkpoint,
+        children=_template_children(),
     )
     if err is not None:
-        return {"since": since, "limit": limit, **err}
+        return {"datechanged": checkpoint, **err}
+    results = _results_node(raw_dict)
+    servertime = ""
+    if results is not None:
+        servertime = ((results.get("_attrs") or {}).get("servertime") or "").strip()
     visits = _extract_visits(raw_dict)
-    # Sort ascending then reverse so the head of the list is the most
-    # recent update (typical delta-sync consumer expectation).
     visits.sort(key=_sort_key)
     visits.reverse()
     return {
-        "since": since,
-        "limit": limit,
+        "datechanged": checkpoint,
+        "servertime": servertime,
         "count": len(visits),
         "by_provider": summarize_by(visits, "provider_name"),
         "by_provider_id": summarize_by(visits, "provider_id"),

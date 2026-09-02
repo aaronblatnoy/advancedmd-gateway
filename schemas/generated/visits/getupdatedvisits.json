@@ -10,22 +10,22 @@
     "tier": 2,
     "write": false
   },
-  "description": "List visits whose record changed at or after an ISO 8601 since timestamp (delta-sync feed, newest first). Returns since, limit, count, by_provider, by_provider_id, by_facility, by_facility_id, by_apptstatus, and a visits list. visits rows: visit_id, starttime, lastupdated, duration, apptstatus, provider_id, provider_name, facility_id, facility_name, profile, profile_id, reason, patient_id, patient_name, chart_number. lastupdated is the AMD modification timestamp.",
+  "description": "List visits whose record changed at or after a checkpoint (datechanged = prior response servertime; alias since). Returns datechanged, servertime, count, group-bys, and a visits list sorted newest-updated first.",
   "type": "object",
-  "required": [
-    "since"
+  "anyOf": [
+    {"required": ["datechanged"]},
+    {"required": ["since"]}
   ],
   "properties": {
-    "limit": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 1000,
-      "default": 100
+    "datechanged": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Prior response servertime checkpoint (ISO 8601). Echo verbatim."
     },
     "since": {
       "type": "string",
       "minLength": 1,
-      "format": "date-time"
+      "description": "Alias for datechanged (deprecated Adam-facing name)."
     }
   }
 }

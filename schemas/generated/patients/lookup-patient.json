@@ -11,12 +11,24 @@
     "tier": 3,
     "write": false
   },
-  "description": "Search patients by name fragment or chart number; the primary way to resolve a name to a patient_id. Returns top-level query, page, count, matches, and narrow_query (true when AMD held back results because the search is too broad). Each row in matches carries patient_id, chart_number, first_name, last_name, and dob. Matches are capped at 5 to discourage enumeration. Pass only a query fragment, no PHI body.",
+  "description": "Search patients by name fragment or chart number; the primary way to resolve a name to a patient_id. Returns query, page, exactmatch, count, matches (full page), and narrow_query when AMD returned more than 50 rows.",
   "type": "object",
   "required": [
     "query"
   ],
   "properties": {
+    "exactmatch": {
+      "type": "boolean",
+      "default": false
+    },
+    "first": {
+      "type": "string",
+      "description": "Optional first name when building query as LAST,FIRST."
+    },
+    "last": {
+      "type": "string",
+      "description": "Optional last name when building query as LAST,FIRST."
+    },
     "page": {
       "description": "Optional 1-based page index for paged enumeration (AARON-REVIEWABLE-2 / DUO-11 default: extend in-place rather than ship a second tool).",
       "type": "integer",
