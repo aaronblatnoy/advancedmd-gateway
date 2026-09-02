@@ -110,4 +110,6 @@ async def handle(
         "by_provcode": summarize_by(charges, "provcode"),
         "by_void": summarize_by(charges, "void"),
         "by_paymentplan": summarize_by(charges, "paymentplan"),
+        # GAP-18: note-audit iterates per-charge id/visit/void before detail calls.
+        "charges": charges,
     }

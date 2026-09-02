@@ -108,7 +108,7 @@ def _note_xml(element: Any, count: int) -> str:
     return etree.tostring(root, encoding="unicode")
 
 
-async def handle(*, patient_id: str, since: Any = None) -> dict[str, Any]:
+async def handle(*, patient_id: str, since: Any = None, template_id: str | None = None) -> dict[str, Any]:
     if not patient_id:
         return {"error": "bad_input", "details": {"reason": "patient_id required"}}
     try:
@@ -120,17 +120,22 @@ async def handle(*, patient_id: str, since: Any = None) -> dict[str, Any]:
             "details": {"reason": f"since must be a date or date-time: {exc}"},
         }
     client = get_client()
+    call_kwargs: dict[str, Any] = {
+        "patientid": patient_id,
+        "createdfrom": _WIDE_FROM,
+        "createdto": _WIDE_TO,
+        "notedatefrom": note_from,
+        "notedateto": _WIDE_TO,
+        "children": _template_children(),
+    }
+    if template_id:
+        call_kwargs["templateid"] = template_id
     element, raw_dict, err = await safe_amd_call_element_async(
         client,
         action=ACTION,
         raw_to_dict_fn=raw_to_dict,
         class_="api",
-        patientid=patient_id,
-        createdfrom=_WIDE_FROM,
-        createdto=_WIDE_TO,
-        notedatefrom=note_from,
-        notedateto=_WIDE_TO,
-        children=_template_children(),
+        **call_kwargs,
     )
     if err is not None:
         return {"patient_id": patient_id, **err}

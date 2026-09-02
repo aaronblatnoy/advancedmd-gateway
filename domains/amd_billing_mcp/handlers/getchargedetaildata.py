@@ -54,6 +54,32 @@ _STATUS_FIELDS = (
 )
 
 
+def _charge_code_row(row: dict) -> dict[str, object]:
+    """GAP-19: CPT + ICD projection for note-audit fetch_charges."""
+    proccode = (row.get("proccode") or "").strip()
+    diagcodes: list[str] = []
+    for child in row.get("_children") or []:
+        if not isinstance(child, dict):
+            continue
+        if child.get("_tag") == "proccodelist":
+            for pc in child.get("_children") or []:
+                if isinstance(pc, dict) and pc.get("_tag") == "proccode":
+                    code = ((pc.get("_attrs") or {}).get("code") or "").strip()
+                    if code:
+                        proccode = code
+        if child.get("_tag") == "diagcodelist":
+            for dc in child.get("_children") or []:
+                if isinstance(dc, dict) and dc.get("_tag") == "diagcode":
+                    code = ((dc.get("_attrs") or {}).get("code") or "").strip()
+                    if code:
+                        diagcodes.append(code)
+    if not diagcodes:
+        raw_diag = (row.get("diagcodes") or "").strip()
+        if raw_diag:
+            diagcodes = [c.strip() for c in raw_diag.split(",") if c.strip()]
+    return {"proccode": proccode, "diagcodes": diagcodes, "modcodes": []}
+
+
 def _flatten_charge(row: dict) -> dict[str, str]:
     """Project a charge row to its status/identifier subset.
 
@@ -84,9 +110,11 @@ async def handle(*, charge_id: str) -> dict[str, Any]:
     # cardinality + group-bys. "it cannot do any math or aggregations
     # properly." A single charge detail typically yields 1 row; we still
     # surface counts/by_* so the contract is uniform.
+    code_rows = [_charge_code_row(r) for r in raw_charges]
     return {
         "charge_id": charge_id,
         "count": len(charges),
         "by_void": summarize_by(charges, "void"),
         "by_billins": summarize_by(charges, "billins"),
+        "rows": code_rows,
     }
