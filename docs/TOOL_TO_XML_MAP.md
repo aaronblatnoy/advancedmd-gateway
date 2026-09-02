@@ -797,13 +797,13 @@ Explicit confirmation for the "likely-missing gap" callout: `lookup_patient` is 
 - Domain package: amd-patients-mcp
 - TIER: 2
 - WRITE_ACTION: False
-- Tool args (handle() kwargs): `start_date: str` (required), `end_date: str` (required), `patient_id: str | None = None`
+- Tool args (handle() kwargs): `start_date: str` (required), `end_date: str` (required), `patient_id: str | None = None`, `apptstatus: str | None = None` (wire override), `apptstatus_codes: Iterable[str] | str | None = None` (joined to `apptstatus` when `apptstatus` omitted; GAP-5)
 - AMD request(s):
   - Call 1: action=`getreminderappts`, class=`api`
-    - attrs: `startdate` <- fed by arg `start_date` (normalized ISO->M/D/YYYY via `_amd_date_format`); `enddate` <- fed by arg `end_date` (same normalization); `starttime` <- hardcoded value `"12:00 AM"`; `endtime` <- hardcoded value `"11:59 PM"`; `apptstatus` <- hardcoded value `"0,1,2,3,5,10,11,12"` (`_DEFAULT_APPT_STATUS`, required by AMD server despite docx marking it optional); `patientid` <- fed by arg `patient_id` (only included when truthy)
+    - attrs: `startdate` <- fed by arg `start_date` (normalized ISO->M/D/YYYY via `_amd_date_format`); `enddate` <- fed by arg `end_date` (same normalization); `starttime` <- hardcoded value `"12:00 AM"`; `endtime` <- hardcoded value `"11:59 PM"`; `apptstatus` <- `_resolve_apptstatus(apptstatus, apptstatus_codes)` defaulting to `"0,1,2,3,5,10,11,12"` (`_DEFAULT_APPT_STATUS`, required by AMD server despite docx marking it optional); `patientid` <- fed by arg `patient_id` (only included when truthy)
     - children: none
     - call count: 1x fixed
-- Returns: `{"start_date", "end_date", "count", "by_remindertype", "by_provider", "by_provider_id", "appts"}` — a flattened `appts` list IS returned here (unlike most siblings) plus group-by dicts; row tag fallback checks `<reminder>` then `<appt>`; no raw AMD blob
+- Returns: `{"start_date", "end_date", "count", "by_remindertype", "by_provider", "by_provider_id", "appts"}` — flattened `appts` rows include additive backend fields `appointment_type_id`, `appointment_type_name`, `patient_firstname`, `patient_lastname`, `patient_middlename`, `appointment_location`, `appt_status`, `rendering_provider_id`, `rendering_provider_name` (GAP-1..4, GAP-20) in addition to the Adam-facing reminder fields; row tag fallback checks `<reminder>` then `<appt>`; no raw AMD blob
 - Client method used: `client.call()` direct (via `safe_amd_call(client, action=ACTION, ...)`)
 
 ### `amd_patients_save_demographic` (module: `savedemographic.py`)

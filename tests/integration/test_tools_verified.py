@@ -204,11 +204,15 @@ async def test_getreminderappts_result_shape(registry, entry_queue):
     assert result["count"] == 2
     assert result["by_remindertype"] == {"CONFIRM": 1, "RECALL": 1}
     assert result["by_provider"] == {"TESTPROVIDER ONE": 1, "TESTPROVIDER TWO": 1}
-    assert set(result["appts"][0]) == {
+    assert {
         "appointment_id", "appointment_datetime", "remindertype",
         "provider_id", "provider_name", "patient_id", "patient_name",
         "phone_cell",
-    }
+        "appointment_type_id", "appointment_type_name",
+        "patient_firstname", "patient_lastname", "patient_middlename",
+        "appointment_location", "appt_status",
+        "rendering_provider_id", "rendering_provider_name",
+    } <= set(result["appts"][0])
 
 
 async def test_getdatevisits_result_shape(registry, entry_queue):
