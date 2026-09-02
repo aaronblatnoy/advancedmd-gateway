@@ -1,35 +1,41 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "amd-mcp/schemas/patients/getreminderappts",
-  "title": "AMD action: getreminderappts",
-  "x-amd-action": {
-    "domain": "patients",
-    "key": "getreminderappts",
-    "name": "getreminderappts",
-    "phi_touching": true,
-    "tier": 2,
-    "write": false
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "amd-mcp/schemas/patients/getreminderappts",
+ "title": "AMD action: getreminderappts",
+ "x-amd-action": {
+  "domain": "patients",
+  "key": "getreminderappts",
+  "name": "getreminderappts",
+  "phi_touching": true,
+  "tier": 2,
+  "write": false
+ },
+ "description": "List appointment-reminder rows for a date range (optionally one patient_id). Returns start_date, end_date, count, by_remindertype, by_provider, by_provider_id, and an appts list. appts rows: appointment_id, appointment_datetime, remindertype, provider_id, provider_name, patient_id, patient_name, phone_cell. remindertype and appointment_datetime give the visit type and start time even when the schedule-grid sibling reports them blank. Optional apptstatus arg filters by comma-separated status codes (rows do not echo their status; filter server-side).",
+ "type": "object",
+ "required": [
+  "start_date",
+  "end_date"
+ ],
+ "properties": {
+  "end_date": {
+   "type": "string",
+   "minLength": 1,
+   "format": "date"
   },
-  "description": "List appointment-reminder rows for a date range (optionally one patient_id). Returns start_date, end_date, count, by_remindertype, by_provider, by_provider_id, and an appts list. appts rows: appointment_id, appointment_datetime, remindertype, provider_id, provider_name, patient_id, patient_name, phone_cell. remindertype and appointment_datetime give the visit type and start time even when the schedule-grid sibling reports them blank.",
-  "type": "object",
-  "required": [
-    "start_date",
-    "end_date"
-  ],
-  "properties": {
-    "end_date": {
-      "type": "string",
-      "minLength": 1,
-      "format": "date"
-    },
-    "patient_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "start_date": {
-      "type": "string",
-      "minLength": 1,
-      "format": "date"
-    }
+  "patient_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "start_date": {
+   "type": "string",
+   "minLength": 1,
+   "format": "date"
+  },
+  "apptstatus": {
+   "type": "string",
+   "minLength": 1,
+   "pattern": "^[0-9]{1,2}(,[0-9]{1,2})*$",
+   "description": "Optional comma-separated AMD appointment-status codes to filter server-side (0 Made, 1 Arrived, 2 Other, 3 Seen, 5 Moved, 10 Cancelled, 11 Deleted, 12 No Show). Defaults to all statuses. AMD does not echo the status on rows, so filter here, not client-side."
   }
+ }
 }
