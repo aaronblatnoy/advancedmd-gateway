@@ -99,7 +99,7 @@ def test_table_shape_is_spec_10_1(table, table_path):
     row = doc["callers"][0]
     assert set(row) == {
         "name", "hash", "priority", "phi", "raw_xml", "may_write", "tools",
-        "per_minute", "max_queue", "created", "revoked",
+        "portal_tools", "per_minute", "max_queue", "created", "revoked",
     }
     assert row["priority"] == "batch"
     assert row["hash"].startswith("sha256:")

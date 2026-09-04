@@ -187,8 +187,9 @@ async def test_getdemographic_result_shape(registry, entry_queue):
         registry, "amd_patients_get_demographic", entry_queue
     )
 
-    assert set(result) == {"patient"}
+    assert set(result) == {"patient", "portal_identity"}
     assert result["patient"]["_tag"] == "PPMDResults"
+    assert isinstance(result["portal_identity"], dict)
     assert "900001" in json.dumps(result)
 
 
@@ -291,9 +292,11 @@ async def test_gettxhistory_result_shape(registry, entry_queue):
 
     assert set(result) == {
         "patient_id", "page", "count", "by_provcode", "by_void", "by_paymentplan",
+        "charges",
     }
     assert result["count"] == 2
     assert result["by_void"] == {"0": 1, "1": 1}
+    assert isinstance(result["charges"], list) and len(result["charges"]) == 2
     # No amounts and no raw blob leave the handler.
     assert "fee" not in json.dumps(result)
 
@@ -303,9 +306,10 @@ async def test_getchargedetaildata_result_shape(registry, entry_queue):
         registry, "amd_billing_get_charge_detail_data", entry_queue
     )
 
-    assert set(result) == {"charge_id", "count", "by_void", "by_billins"}
+    assert set(result) == {"charge_id", "count", "by_void", "by_billins", "rows"}
     assert result["count"] == 1
     assert result["by_billins"] == {"1": 1}
+    assert isinstance(result["rows"], list) and len(result["rows"]) == 1
 
 
 # ------------------------------------------------- Appendix C defects
