@@ -180,6 +180,9 @@ class Caller:
     may_write: tuple[str, ...] = ()
     #: "*" or an explicit allowlist of tool names (canonical or alias, D-1).
     tools: str | tuple[str, ...] = "*"
+    #: Portal UI tools (get_insurance_details, ...). "*" or explicit list;
+    #: default empty = deny all portal tools.
+    portal_tools: str | tuple[str, ...] = ()
     #: Optional per-caller per-minute cap applied before the office bucket.
     per_minute: int | None = None
     #: Max records this caller may have waiting (SPEC 15).

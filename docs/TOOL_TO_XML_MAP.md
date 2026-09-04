@@ -9,7 +9,7 @@ Conventions used below:
 - "`client.call()` direct" means the handler invokes the generic `AMDClient.call(action, class_, *, children, **attrs)`; nearly all handlers do so through `amd_mcp_common.errors.safe_amd_call(client, action=..., raw_to_dict_fn=..., **kwargs)`, which forwards to `client.call(action=action, **kwargs)` and converts AMD faults into `{"error": ...}` dicts.
 - Typed helpers that exist on `AMDClient`: `get_visits_for_date` (getdatevisits/api), `get_appointments_via_reminders` (getreminderappts/api), `get_patient_bundle` (getdemographic/demographics). Only `amd_patients_get_demographic` uses one of them.
 - No handler returns raw XML via a bare `raw_to_dict` passthrough; every handler that runs a real call flattens the response into counts / capped match lists / group-by dicts. This is called out per section.
-- amd-portal-mcp is NOT part of this map: it drives the AMD web UI with a browser (`amd_portal_mcp/server.py` exposes `get_insurance_details`, `get_insurance_details_batch`, `portal_session_status` via `@mcp.tool()`), uses no `amd_client`, and sends no `ppmdmsg` XML.
+- amd-portal-mcp is NOT part of this map: it drives the AMD web UI with a browser (`portal/` exposes `get_insurance_details`, `get_insurance_details_batch`, `portal_login`, `portal_session_status`), uses no `amd_client`, and sends no `ppmdmsg` XML.
 
 ## 1. Tools exposed, by domain package
 

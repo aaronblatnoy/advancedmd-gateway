@@ -145,6 +145,19 @@ def _parse_caller(entry: Mapping[str, Any]) -> tuple[str, Caller]:
         tools: str | tuple[str, ...] = "*"
     else:
         tools = _as_tuple(tools_raw, f"caller {name}: tools")
+    portal_raw = entry.get("portal_tools", ())
+    if isinstance(portal_raw, str):
+        if portal_raw != "*":
+            raise TokenError(
+                f"caller {name}: portal_tools must be \"*\" or a list"
+            )
+        portal_tools: str | tuple[str, ...] = "*"
+    elif portal_raw is None:
+        portal_tools = ()
+    else:
+        portal_tools = _as_tuple(
+            portal_raw, f"caller {name}: portal_tools"
+        )
     per_minute = entry.get("per_minute")
     if per_minute is not None:
         try:
@@ -161,6 +174,7 @@ def _parse_caller(entry: Mapping[str, Any]) -> tuple[str, Caller]:
         raw_xml=bool(entry.get("raw_xml", False)),
         may_write=_as_tuple(entry.get("may_write"), f"caller {name}: may_write"),
         tools=tools,
+        portal_tools=portal_tools,
         per_minute=per_minute,
         max_queue=int(max_queue),
         created=entry.get("created"),
@@ -178,6 +192,9 @@ def _serialize_caller(hashed: str, caller: Caller) -> dict[str, Any]:
         "raw_xml": caller.raw_xml,
         "may_write": list(caller.may_write),
         "tools": "*" if caller.tools == "*" else list(caller.tools),
+        "portal_tools": (
+            "*" if caller.portal_tools == "*" else list(caller.portal_tools)
+        ),
         "per_minute": caller.per_minute,
         "max_queue": caller.max_queue,
         "created": caller.created,
@@ -408,6 +425,9 @@ def _row_for_list(caller: Caller) -> dict[str, Any]:
     row = asdict(caller)
     row["priority"] = PRIORITY_NAMES[caller.priority]
     row["tools"] = "*" if caller.tools == "*" else list(caller.tools)
+    row["portal_tools"] = (
+        "*" if caller.portal_tools == "*" else list(caller.portal_tools)
+    )
     row["may_write"] = list(caller.may_write)
     assert "hash" not in row and "token" not in row
     return row
@@ -420,13 +440,22 @@ def _format_list(callers: Iterable[Caller]) -> str:
     lines = []
     for row in rows:
         tools = row["tools"] if row["tools"] == "*" else ",".join(row["tools"]) or "-"
+        portal = (
+            row["portal_tools"]
+            if row["portal_tools"] == "*"
+            else ",".join(row["portal_tools"]) or "-"
+        )
         lines.append(
             "{name}  priority={priority} phi={phi} raw_xml={raw_xml} "
-            "may_write={may_write} tools={tools} per_minute={per_minute} "
-            "max_queue={max_queue} created={created} revoked={revoked}".format(
-                **{**row,
-                   "may_write": ",".join(row["may_write"]) or "-",
-                   "tools": tools}
+            "may_write={may_write} tools={tools} portal_tools={portal_tools} "
+            "per_minute={per_minute} max_queue={max_queue} "
+            "created={created} revoked={revoked}".format(
+                **{
+                    **row,
+                    "may_write": ",".join(row["may_write"]) or "-",
+                    "tools": tools,
+                    "portal_tools": portal,
+                }
             )
         )
     return "\n".join(lines)
@@ -452,6 +481,11 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("--raw-xml", action="store_true")
     add.add_argument("--may-write", default="")
     add.add_argument("--tools", default="*")
+    add.add_argument(
+        "--portal-tools",
+        default="",
+        help="portal UI allowlist: * or comma-separated names (default: deny all)",
+    )
     add.add_argument("--per-minute", type=int, default=None)
     add.add_argument("--max-queue", type=int, default=None)
 
@@ -485,6 +519,10 @@ def main(argv: Sequence[str] | None = None, *, stdout: Any = None) -> int:
             tools: str | tuple[str, ...] = (
                 "*" if args.tools.strip() == "*" else _split(args.tools)
             )
+            portal_arg = (args.portal_tools or "").strip()
+            portal_tools: str | tuple[str, ...] = (
+                "*" if portal_arg == "*" else _split(portal_arg)
+            )
             caller = Caller(
                 name=args.name,
                 priority=priority,
@@ -492,6 +530,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: Any = None) -> int:
                 raw_xml=args.raw_xml,
                 may_write=_split(args.may_write),
                 tools=tools,
+                portal_tools=portal_tools,
                 per_minute=args.per_minute,
                 max_queue=(
                     args.max_queue
