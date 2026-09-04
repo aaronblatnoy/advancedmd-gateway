@@ -21,7 +21,7 @@ COPY pyproject.toml README.md* ./
 COPY gateway/ ./gateway/
 COPY portal/ ./portal/
 
-RUN pip install --no-cache-dir . \
+RUN pip install --no-cache-dir ".[portal]" \
  && playwright install chromium
 
 VOLUME ["/data", "/root/.amd-playwright-profile"]

@@ -24,12 +24,17 @@ dev = [
     "pytest-asyncio>=0.23",
     "respx>=0.21",
 ]
+portal = [
+    "playwright>=1.40",
+    "langgraph>=0.2",
+    "python-dotenv>=1.0",
+]
 
 [project.scripts]
 gateway = "gateway.tokens:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["gateway", "domains"]
+packages = ["gateway", "domains", "portal"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
