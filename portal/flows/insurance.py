@@ -3,7 +3,7 @@
 Recorded navigation (see docs/insurance-flow.md for the full chain):
 app page -> Scheduler -> frmScheduler iframe patient search -> pencil ->
 frmPatientInfo iframe -> Insurance -> nested "Insurance N" iframe ->
-Details.
+passive claims-address read -> Details.
 
 Orchestration is a LangGraph of deterministic Playwright stages with a
 local-LLM recovery node when a stage fails recoverably. See
@@ -17,9 +17,11 @@ from playwright.async_api import Page
 
 from ._runner import Checkpoints
 from portal.graphs.insurance_graph import (
+    run_check_eligibility_graph,
     run_get_insurance_details_graph,
     run_insurance_navigation_graph,
 )
+from . import trace as _trace_mod
 
 log = logging.getLogger("amd_portal_mcp")
 
@@ -43,8 +45,9 @@ FIELDS = [
     "eligibility_last_checked",
 ]
 
-# Re-export for tests and batch whitelist.
+# Re-export additive field groups for tests and the batch whitelist.
 from .eligibility import ELIGIBILITY_FIELDS  # noqa: E402
+from .claims_address import CLAIMS_ADDRESS_FIELDS  # noqa: E402
 
 
 async def open_insurance_details(
@@ -69,15 +72,31 @@ async def get_insurance_details(
     )
 
 
+async def check_eligibility(
+    page: Page, patient: str, insurance_index: int = 1, checkpoints=None
+) -> dict:
+    """Fire AMD Check Eligibility (billable) then scrape the fresh 271.
+
+    Same whitelist as get_insurance_details. Gated at the executor /
+    env layer — this body itself always performs the click when invoked.
+    """
+    return await run_check_eligibility_graph(
+        page, patient, insurance_index, checkpoints=checkpoints
+    )
+
+
 # Fields a batch item result is allowed to carry (whitelist). No raw
 # content ever leaves the server: only the scraped FIELDS plus these
 # bounded metadata/status keys.
-_BATCH_OK_KEYS = set(FIELDS) | set(ELIGIBILITY_FIELDS) | {
-    "patient", "insurance_index", "index", "session_reestablished",
+_BATCH_OK_KEYS = set(FIELDS) | set(ELIGIBILITY_FIELDS) | set(
+    CLAIMS_ADDRESS_FIELDS
+) | {
+    "patient", "insurance_index", "index", "session_reestablished", "ok",
+    "trace",
 }
 _BATCH_ERR_KEYS = {
     "ok", "flow", "error", "message", "diagnosis", "next_action",
-    "retryable", "run_id", "index", "session_reestablished",
+    "retryable", "run_id", "index", "session_reestablished", "trace",
 }
 
 
@@ -141,6 +160,12 @@ async def get_insurance_details_batch(
             item = _whitelist_item(details, _BATCH_OK_KEYS)
             item["ok"] = True
             item["index"] = i
+            # Per-item story (batch outer run_flow has its own session trace).
+            item["trace"] = [
+                _trace_mod.format_started("get_insurance_details"),
+                *item_cp.trace_lines(),
+                _trace_mod.format_completed("get_insurance_details"),
+            ]
             if item.get("session_reestablished"):
                 relogins += 1
             ok_count += 1
@@ -154,6 +179,11 @@ async def get_insurance_details_batch(
                 "index": i,
                 "error": type(exc).__name__,
                 "message": type(exc).__name__,
+                "trace": [
+                    _trace_mod.format_started("get_insurance_details"),
+                    *item_cp.trace_lines(),
+                    _trace_mod.format_failed("get_insurance_details"),
+                ],
             }
             item = _whitelist_item(item, _BATCH_ERR_KEYS)
         results.append(item)

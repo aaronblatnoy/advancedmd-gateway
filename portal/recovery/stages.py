@@ -41,12 +41,16 @@ async def stage_goal_met(page, goal_stage: str) -> bool:
                 has=pinfo.get_by_text("Insurance", exact=True)
             )
             return await cards.count() > 0
-        if stage == "eligibility_details_open":
+        if stage in (
+            "eligibility_details_open",
+            "eligibility_check_fired",
+            "eligibility_check_open",
+        ):
             for frame in page.frames:
                 if getattr(frame, "name", None) == ELIGIBILITY_FRAME_NAME:
                     return True
             return False
-        if stage == "fields_scraped":
+        if stage in ("fields_scraped", "claims_address_scraped"):
             return await stage_goal_met(page, "insurance_card_open")
     except Exception:
         log.debug("stage_goal_met failed stage=%s", stage, exc_info=True)

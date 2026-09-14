@@ -55,10 +55,12 @@ its safety properties are structural instead:
    named fields (see `FIELDS` in each flow module) — never raw HTML,
    page text, or screenshots. This is the PHI boundary: what leaves
    the server is bounded and reviewable.
-3. **Read-only.** All current flows observe the portal. A flow that
-   submits or mutates AMD state requires a decision file under
-   `memory/decisions/` with Aaron's sign-off (same bar as flipping
-   `WRITE_TOOLS_ENABLED` elsewhere in this repo).
+3. **Read-only by default.** `get_insurance_details` observes only.
+   The ONE billable write is **`check_eligibility`** (clicks Check
+   Eligibility), gated by `AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1` +
+   `confirm=true` + token allowlist. Decision:
+   `memory/decisions/2026-09-14-portal-check-eligibility-write.md`.
+   Any other submit/mutate flow still needs a new decision file.
 
 ## Critical rules (NEVER violate)
 
@@ -79,8 +81,8 @@ its safety properties are structural instead:
 |---|---|
 | `portal/server.py` | MCP entry; one tool per flow, wired through the runner |
 | `portal/browser.py` | Shared persistent Playwright context |
-| `portal/flows/` | One module per scripted flow. `flows/eligibility.py` scrapes the read-only real-time eligibility (271) Details panel; insurance flow merges `eligibility_*` fields. Clicks ONLY "Details", NEVER "Check Eligibility" |
-| `portal/flows/_runner.py` | `run_flow()`: timeout, re-login retry, checkpoints, diagnosis enum |
+| `portal/flows/` | One module per scripted flow. `flows/claims_address.py` passively reads the unverified claims-specific legacy-card selectors (no carrier-detail click); `flows/eligibility.py` scrapes the read-only real-time eligibility (271) Details panel. Insurance merges both bounded field groups. Clicks ONLY "Details", NEVER "Check Eligibility" or a carrier lookup control |
+| `portal/flows/_runner.py` | `run_flow()`: timeout, re-login retry, checkpoints, deterministic `trace`, diagnosis enum |
 | `portal/graphs/insurance_graph.py` | **Reference LangGraph** — deterministic checkpoint nodes + `llm_recover` |
 | `portal/graphs/flow_support.py` | Recoverable-stage routing rules shared by flow graphs |
 | `portal/app.py` | FastAPI sidecar — `POST/GET /v1/portal/tools`, `/health`, `/mcp/portal` |
@@ -91,16 +93,17 @@ its safety properties are structural instead:
 | `portal/llm/ollama.py` | Local llm-server/Ollama adapter (`phi_safe=True`) |
 | `portal/console.py` | Aaron-only test console (`amd-portal-console`, `127.0.0.1:8811` on black-sky) |
 | `tests/portal/` | pytest suite (FakePage, no browser/network) |
-| `docs/portal/` | TOOLS.md, testing.md, navigation docs |
+| `docs/portal/` | TOOLS.md, TRACES.md, testing.md, navigation docs |
 
 Tool results are `{"ok": true, "data": {...}, "checkpoints": {...},
-"run_id": ...}` on success or `{"ok": false, "flow", "error",
-"message", "diagnosis", "next_action", "retryable", "checkpoints",
-"run_id", "debug_screenshot"}` on failure; the message carries
-exception class/selector info only, never page content, and checkpoint
-names/messages are fixed strings (no page content, no search strings).
+"trace": [...], "run_id": ...}` on success or `{"ok": false, "flow",
+"error", "message", "diagnosis", "next_action", "retryable",
+"checkpoints", "trace", "run_id", "debug_screenshot"}` on failure; the
+message carries exception class/selector info only, never page content,
+and checkpoint names / `trace` sentences are fixed strings (no page
+content, no search strings). See `docs/portal/TRACES.md`.
 `diagnosis` is a closed enum (login_rejected, portal_changed,
 portal_slow, patient_not_found, ambiguous_match, unknown); the table
 mapping each to a fixed next_action + retryable flag is in
-`docs/testing.md`. MCP mode leaves AMD_PORTAL_CAPTURE unset, so no
+`docs/portal/testing.md`. MCP mode leaves AMD_PORTAL_CAPTURE unset, so no
 checkpoint screenshots are taken for MCP calls.

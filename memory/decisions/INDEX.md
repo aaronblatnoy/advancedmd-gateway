@@ -6,6 +6,8 @@ consequences form.
 
 | Date | Decision |
 |---|---|
+| 2026-09-14 | [Portal check_eligibility write](2026-09-14-portal-check-eligibility-write.md) — gated billable Check Eligibility click for stale AMD 271 |
+| 2026-09-06 | [Portal human-readable traces](2026-09-06-portal-human-readable-traces.md) — top-level deterministic `trace[]` on every computer-use result |
 | 2026-09-03 | [Portal login tool](2026-09-03-portal-login-tool.md) — deterministic `portal_login` / `login` to reopen expired sessions |
 | 2026-09-02 | [Portal flows: LangGraph deterministic + LLM recovery](2026-09-02-portal-flows-langgraph-deterministic-plus-llm.md) — checkpoint nodes + shared `llm_recover` |
 | 2026-08-30 | [Portal sidecar + LangGraph recovery](2026-08-30-portal-sidecar-langgraph-recovery.md) — `portal/` on `:8821`, `portal_tools` allowlist, local Ollama recovery |

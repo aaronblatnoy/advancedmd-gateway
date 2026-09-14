@@ -142,6 +142,18 @@ def test_only_details_clicked_never_check_eligibility():
     assert eligibility._CHECK_ELIGIBILITY_LABEL not in clicks
 
 
+def test_fire_check_eligibility_clicks_billable_control():
+    clicks = []
+
+    class _CheckPanel(_PanelFrame):
+        def get_by_role(self, role, name=""):
+            return _Loc(count=1, clicks=clicks, label=name)
+
+    panel = _CheckPanel()
+    asyncio.run(eligibility.fire_check_eligibility(panel, settle_timeout_s=1))
+    assert eligibility._CHECK_ELIGIBILITY_LABEL in clicks
+
+
 def test_panel_never_attaches_returns_unavailable(monkeypatch):
     async def _no_sleep(*a, **k):
         pass

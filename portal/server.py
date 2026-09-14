@@ -43,17 +43,24 @@ async def get_insurance_details(patient: str, insurance_index: int = 1) -> str:
     2 = secondary, ...). Returns JSON {"ok": true, "data": {...}} with
     carrier name/code, coverage type, policy/group numbers, subscriber
     name/relationship, effective/termination dates, copay, payer id, and
-    eligibility status/last-checked from the insurance card, PLUS the
-    real-time eligibility (271) carrier response already on file, scraped
-    from the read-only "Details" panel and merged flat under an
+    eligibility status/last-checked from the insurance card; the carrier's
+    claims mailing address merged flat as claims_address_available,
+    claims_address_line1, claims_address_line2, claims_city, claims_state,
+    claims_zip, claims_carrier_name, claims_payer_id, and
+    claims_address_reason; PLUS the real-time eligibility (271) carrier
+    response already on file, scraped from the read-only "Details" panel
+    and merged flat under an
     ``eligibility_`` prefix (eligibility_available, eligibility_no_data,
     eligibility_plan_status, eligibility_copay, eligibility_deductible,
     eligibility_out_of_pocket, eligibility_service_types, ...). When no
     carrier response is on file, eligibility_available is false and the
     benefit fields are empty (the card fields still return). Reading the
-    271 panel is read-only: it clicks only "Details" (a display), never
-    "Check Eligibility" (a billable inquiry). Or {"ok": false, ...} with a
-    structured error.
+    claims address is passive and never opens the unverified carrier-detail
+    control; until its selectors are confirmed, absence returns
+    claims_address_available=false with a closed claims_address_reason.
+    Reading the 271 panel is read-only: it clicks only "Details" (a display),
+    never "Check Eligibility" (a billable inquiry). Or {"ok": false, ...}
+    with a structured error.
     """
     page = await browser.get_page()
     result = await run_flow(
@@ -89,6 +96,48 @@ async def get_insurance_details_batch(
         insurance.get_insurance_details_batch,
         page,
         patients=patients,
+        insurance_index=insurance_index,
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def check_eligibility(
+    patient: str, insurance_index: int = 1, confirm: bool = False
+) -> str:
+    """Fire AMD portal Check Eligibility (billable) then scrape the fresh 271.
+
+    Owner-gated write. Requires the sidecar env
+    AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 and confirm=true. Opens the same
+    insurance card path as get_insurance_details, clicks Check Eligibility
+    inside frmEligibilityDetails, waits for the carrier response, and
+    returns the same eligibility_* whitelist. Never clicks Save / Submit /
+    Bypass. Returns JSON {"ok": true, "data": {...}} or {"ok": false, ...}.
+    """
+    import os
+
+    if (os.environ.get("AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED") or "0").strip() != "1":
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "tool_forbidden",
+                "message": "AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 required",
+            }
+        )
+    if not confirm:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "confirm_required",
+                "message": "check_eligibility requires confirm=true",
+            }
+        )
+    page = await browser.get_page()
+    result = await run_flow(
+        "check_eligibility",
+        insurance.check_eligibility,
+        page,
+        patient=patient,
         insurance_index=insurance_index,
     )
     return json.dumps(result, indent=2)

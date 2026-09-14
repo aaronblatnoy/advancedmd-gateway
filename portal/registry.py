@@ -16,8 +16,9 @@ __all__ = [
 
 PortalHandler = Callable[..., Awaitable[dict]]
 
-# The first computer-use capability we ship: insurance card + on-file 271
-# Details (clicks AMD's read-only "Details" panel — never Check Eligibility).
+# The first computer-use capability we ship: insurance card + passive carrier
+# claims-address read + on-file 271 Details (clicks AMD's read-only "Details"
+# panel — never Check Eligibility or a carrier lookup control).
 PRIMARY_PORTAL_TOOL = "get_insurance_details"
 
 # Shorthand callers may use; resolves to PRIMARY_PORTAL_TOOL for auth + execution.
@@ -40,14 +41,26 @@ PORTAL_REGISTRY: dict[str, PortalToolEntry] = {
         name=PRIMARY_PORTAL_TOOL,
         description=(
             "Primary computer-use tool: fetch patient insurance card fields "
-            "+ on-file 271 Details from the AMD portal UI (read-only Details "
-            "click; never Check Eligibility)."
+            "+ passively read carrier claims-address fields + on-file 271 "
+            "Details from the AMD portal UI (read-only Details click; never "
+            "Check Eligibility or a carrier lookup control)."
         ),
         primary=True,
     ),
     "get_insurance_details_batch": PortalToolEntry(
         name="get_insurance_details_batch",
         description="Batch insurance details over one warm portal session.",
+    ),
+    "check_eligibility": PortalToolEntry(
+        name="check_eligibility",
+        description=(
+            "Owner-gated billable write: open the insurance card Details "
+            "panel and click Check Eligibility, then scrape the fresh 271 "
+            "whitelist. Requires AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 and "
+            "args.confirm=true. Appointment-validator uses this when stored "
+            "AMD eligibility is stale/not-green."
+        ),
+        write=True,
     ),
     "portal_login": PortalToolEntry(
         name="portal_login",

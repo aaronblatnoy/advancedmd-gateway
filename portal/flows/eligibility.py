@@ -50,9 +50,11 @@ log = logging.getLogger("amd_portal_mcp")
 # Frame opened by the legacy-frame "Details" button.
 ELIGIBILITY_FRAME_NAME = "frmEligibilityDetails"
 
-# The billable control we must never touch, pinned here so its name is
-# documented and greppable. This module never clicks it.
+# Billable control. The read-only Details scrape never clicks it.
+# Owner-gated ``check_eligibility`` (see memory/decisions/2026-09-14-…)
+# is the ONE flow allowed to fire it.
 _CHECK_ELIGIBILITY_LABEL = "Check Eligibility"
+_CHECK_ELIGIBILITY_SECTION = ".service-type-and-check-eligibility-section"
 
 # Whitelist of eligibility fields merged into the insurance result under an
 # ``eligibility_`` prefix. Only fields that the read-only 271 Details panel
@@ -234,6 +236,27 @@ async def open_eligibility_frame(app, ins):
     if frame is None:
         log.info("flow=eligibility frmEligibilityDetails did not attach")
     return frame
+
+
+async def fire_check_eligibility(frame, *, settle_timeout_s: int = 60) -> None:
+    """Click the billable Check Eligibility control and wait for settle.
+
+    Caller must already have opened ``frmEligibilityDetails``. This is the
+    gated write used by the ``check_eligibility`` portal tool only — never
+    by ``get_insurance_details`` / Details scrape.
+    """
+    if frame is None:
+        raise RuntimeError("eligibility frame missing; cannot Check Eligibility")
+    # Prefer role name (stable); fall back to the documented section button.
+    btn = frame.get_by_role("button", name=_CHECK_ELIGIBILITY_LABEL)
+    if await btn.count() == 0:
+        btn = frame.locator(
+            f"{_CHECK_ELIGIBILITY_SECTION} button"
+        )
+    await btn.first.wait_for(state="visible", timeout=15000)
+    await btn.first.click(timeout=15000)
+    log.info("flow=eligibility fired Check Eligibility (gated write)")
+    await _wait_settled(frame, timeout_s=settle_timeout_s)
 
 
 async def read_eligibility_from_frame(frame) -> dict:

@@ -18,8 +18,13 @@ from langgraph.graph import END, START, StateGraph
 from portal.flows._runner import Checkpoints
 from portal.flows.eligibility import (
     ELIGIBILITY_FIELDS,
+    fire_check_eligibility,
     open_eligibility_frame,
     read_eligibility_from_frame,
+)
+from portal.flows.claims_address import (
+    CLAIMS_ADDRESS_FIELDS,
+    scrape_claims_address,
 )
 from portal.flows.insurance_stages import (
     InsuranceFlowState,
@@ -37,10 +42,11 @@ log = logging.getLogger("portal.graphs.insurance")
 
 __all__ = [
     "run_get_insurance_details_graph",
+    "run_check_eligibility_graph",
     "run_insurance_navigation_graph",
 ]
 
-Mode = Literal["full", "navigation_only"]
+Mode = Literal["full", "navigation_only", "check_eligibility"]
 
 
 class InsuranceGraphState(TypedDict, total=False):
@@ -127,11 +133,23 @@ async def fields_scraped_node(state: InsuranceGraphState) -> dict:
 
 async def eligibility_node(state: InsuranceGraphState) -> dict:
     flow = state["flow"]
+    mode = state.get("mode") or "full"
+    stage = "eligibility_details_open"
     try:
         async with flow.checkpoints.stage(
             "eligibility_details_open", flow.app
         ):
             frame = await open_eligibility_frame(flow.app, flow.ins)
+        if mode == "check_eligibility":
+            if frame is None:
+                raise RuntimeError(
+                    "eligibility frame missing; cannot Check Eligibility"
+                )
+            stage = "eligibility_check_fired"
+            async with flow.checkpoints.stage(
+                "eligibility_check_fired", flow.app
+            ):
+                await fire_check_eligibility(frame)
         if frame is None:
             elig = await read_eligibility_from_frame(None)
         else:
@@ -146,8 +164,32 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
         }
     except Exception as exc:
         return {
-            "failed_stage": "eligibility_details_open",
-            "retry_stage": "eligibility_details_open",
+            "failed_stage": stage,
+            "retry_stage": stage,
+            "last_error": exc,
+        }
+
+
+async def claims_address_node(state: InsuranceGraphState) -> dict:
+    """Passively merge the claims-address field group from the open card."""
+    flow = state["flow"]
+    try:
+        async with flow.checkpoints.stage(
+            "claims_address_scraped", flow.app
+        ):
+            claims = await scrape_claims_address(flow.ins)
+        data = dict(state.get("data") or {})
+        data.update(claims)
+        return {
+            "data": data,
+            "failed_stage": None,
+            "retry_stage": None,
+            "last_error": None,
+        }
+    except Exception as exc:
+        return {
+            "failed_stage": "claims_address_scraped",
+            "retry_stage": "claims_address_scraped",
             "last_error": exc,
         }
 
@@ -163,7 +205,10 @@ async def finalize_node(state: InsuranceGraphState) -> dict:
         data["session_reestablished"] = True
     log.info(
         "insurance_graph done field presence: %s",
-        {f: bool(data.get(f)) for f in FIELDS},
+        {
+            f: bool(data.get(f))
+            for f in (*FIELDS, *CLAIMS_ADDRESS_FIELDS, *ELIGIBILITY_FIELDS)
+        },
     )
     return {"data": data}
 
@@ -175,6 +220,7 @@ async def llm_recover_node(state: InsuranceGraphState) -> dict:
     flow = state["flow"]
     recovered, steps = await run_recovery(flow.page, goal_stage=stage)
     flow.checkpoints.recovery_steps += steps
+    flow.checkpoints.note_recovery(stage, cleared=recovered)
     total = int(state.get("recovery_steps") or 0) + steps
     retries = _bump_retry(state, stage)
     if not recovered:
@@ -208,8 +254,10 @@ def _route_after_recover(state: InsuranceGraphState) -> str:
     if state.get("aborted"):
         return "fail"
     target = state.get("retry_stage") or "scheduler_open"
-    if target == "eligibility_details_open":
+    if target in ("eligibility_details_open", "eligibility_check_fired"):
         return "eligibility"
+    if target == "claims_address_scraped":
+        return "claims_address"
     return target
 
 
@@ -230,6 +278,7 @@ def _build_graph():
     g.add_node("patient_info_open", patient_info_open_node)
     g.add_node("insurance_card_open", insurance_card_open_node)
     g.add_node("fields_scraped", fields_scraped_node)
+    g.add_node("claims_address", claims_address_node)
     g.add_node("eligibility", eligibility_node)
     g.add_node("finalize", finalize_node)
     g.add_node("llm_recover", llm_recover_node)
@@ -275,6 +324,15 @@ def _build_graph():
     )
     g.add_conditional_edges(
         "fields_scraped",
+        lambda s: _route_after_stage(s, "claims_address"),
+        {
+            "claims_address": "claims_address",
+            "llm_recover": "llm_recover",
+            "fail": END,
+        },
+    )
+    g.add_conditional_edges(
+        "claims_address",
         lambda s: _route_after_stage(s, "eligibility"),
         {
             "eligibility": "eligibility",
@@ -302,6 +360,7 @@ def _build_graph():
             "patient_info_open": "patient_info_open",
             "insurance_card_open": "insurance_card_open",
             "fields_scraped": "fields_scraped",
+            "claims_address": "claims_address",
             "eligibility": "eligibility",
             "fail": END,
         },
@@ -364,9 +423,27 @@ async def run_get_insurance_details_graph(
     insurance_index: int = 1,
     checkpoints: Checkpoints | None = None,
 ) -> dict:
-    """Run the full LangGraph (nav + scrape + eligibility)."""
+    """Run the full LangGraph (nav + scrape + on-file eligibility Details)."""
     final = await _invoke(
         page, patient, insurance_index, checkpoints, mode="full"
+    )
+    _raise_if_failed(final)
+    return dict(final.get("data") or {})
+
+
+async def run_check_eligibility_graph(
+    page,
+    patient: str,
+    insurance_index: int = 1,
+    checkpoints: Checkpoints | None = None,
+) -> dict:
+    """Nav + Details + billable Check Eligibility + scrape fresh 271."""
+    final = await _invoke(
+        page,
+        patient,
+        insurance_index,
+        checkpoints,
+        mode="check_eligibility",
     )
     _raise_if_failed(final)
     return dict(final.get("data") or {})
