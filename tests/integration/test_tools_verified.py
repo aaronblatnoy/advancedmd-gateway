@@ -316,11 +316,9 @@ async def test_getchargedetaildata_result_shape(registry, entry_queue):
         registry, "amd_billing_get_charge_detail_data", entry_queue
     )
 
-    assert set(result) == {"charge_id", "count", "by_void", "by_billins"}
+    assert set(result) == {"charge_id", "count", "by_void", "by_billins", "rows"}
     assert result["count"] == 1
     assert result["by_billins"] == {"1": 1}
-<<<<<<< HEAD
-=======
     assert isinstance(result["rows"], list) and len(result["rows"]) == 1
     # GAP-19: charge attrs are pcode/dcode FKs; rows must ship real CPT/ICD.
     assert result["rows"][0] == {
@@ -328,7 +326,7 @@ async def test_getchargedetaildata_result_shape(registry, entry_queue):
         "diagcodes": ["L85.3", "L57.0"],
         "modcodes": [],
     }
->>>>>>> 77afbc3 (fix(billing): resolve getchargedetaildata pcode/dcode FKs to CPT/ICD)
+
 
 
 # ------------------------------------------------- Appendix C defects
