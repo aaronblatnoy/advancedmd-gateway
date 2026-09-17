@@ -48,6 +48,7 @@ ARGS: dict[str, dict[str, Any]] = {
     "amd_visits_get_date_visits": {"date": "2026-06-01"},
     "amd_visits_get_updated_visits": {"since": "2026-06-01", "limit": 100},
     "amd_patients_lookup_patient": {"query": "ALPHA"},
+    "amd_patients_is_patient": {"name": "Alpha."},
     "amd_patients_uploadfile": {
         "patient_id": "900001",
         "file_name": "synthetic-document.pdf",
@@ -260,6 +261,18 @@ async def test_lookuppatient_result_shape(registry, entry_queue):
     assert [m["last_name"] for m in result["matches"]] == ["ALPHA", "BETA"]
 
 
+async def test_ispatient_result_shape_carries_no_phi(registry, entry_queue):
+    result, sender, _l = await run_tool(registry, "amd_patients_is_patient", entry_queue)
+
+    assert result == {
+        "is_patient": True, "count": 2, "exactmatch": True,
+        "mode": "last", "matched_as": "last",
+    }
+    # Cleaned + upper-cased before the wire; nothing from the reply leaks.
+    assert sender.sent[0].attrs["name"] == "ALPHA"
+    assert "ALPHA" not in str(result) and "BETA" not in str(result)
+
+
 async def test_uploadfile_result_shape(registry, entry_queue):
     result, sender, _l = await run_tool(registry, "amd_patients_uploadfile", entry_queue)
 
@@ -306,6 +319,16 @@ async def test_getchargedetaildata_result_shape(registry, entry_queue):
     assert set(result) == {"charge_id", "count", "by_void", "by_billins"}
     assert result["count"] == 1
     assert result["by_billins"] == {"1": 1}
+<<<<<<< HEAD
+=======
+    assert isinstance(result["rows"], list) and len(result["rows"]) == 1
+    # GAP-19: charge attrs are pcode/dcode FKs; rows must ship real CPT/ICD.
+    assert result["rows"][0] == {
+        "proccode": "17110",
+        "diagcodes": ["L85.3", "L57.0"],
+        "modcodes": [],
+    }
+>>>>>>> 77afbc3 (fix(billing): resolve getchargedetaildata pcode/dcode FKs to CPT/ICD)
 
 
 # ------------------------------------------------- Appendix C defects
