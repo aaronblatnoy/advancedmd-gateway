@@ -1,14 +1,30 @@
 <!-- synthetic fixture - hand-written from reference client XML shapes, contains no real patient data -->
+<!-- live AMD shape: Results-level code lists; charge attrs are pcode/dcode FKs -->
 <PPMDResults>
-  <Results success="1">
-    <chargelist>
-      <charge id="400001" createtime="6/1/2026 9:30 AM" begindate="6/1/2026" enddate="6/1/2026"
-              proccode="00000" diagcodes="Z00.00" modcodes="" batchnumber="0"
-              finclasscode="TESTFC" billins="1" insbilled="0" void="0" protected="0"
-              paymentplan="0" voideddate="">
-        <proccodelist><proccode code="00000"/></proccodelist>
-        <diagcodelist><diagcode code="Z00.00"/></diagcodelist>
-      </charge>
-    </chargelist>
+  <Results success="1" customclaimfieldsavailable="1">
+    <patientlist>
+      <patient id="900001" name="DOE,JOHN" chart="00000">
+        <visitlist>
+          <visit id="vst800001" date="6/1/2026" isappt="1" facility="fac1">
+            <chargelist>
+              <charge id="400001" createtime="6/1/2026 9:30 AM" begindate="6/1/2026" enddate="6/1/2026"
+                      proccode="pcode65075"
+                      diagcodes="dcode111435 dcode111460"
+                      modcodes="" batchnumber="0"
+                      finclasscode="TESTFC" billins="1" insbilled="0" void="0" protected="0"
+                      paymentplan="0" voideddate=""/>
+            </chargelist>
+          </visit>
+        </visitlist>
+      </patient>
+    </patientlist>
+    <proccodelist>
+      <proccode id="pcode65075" name="DESTR BENIGN LESIONS 1-14" code="17110"/>
+    </proccodelist>
+    <diagcodelist>
+      <diagcode id="dcode111435" name="XEROSIS CUTIS" code="L85.3" codeset="10"/>
+      <diagcode id="dcode111460" name="ACTINIC KERATOSIS" code="L57.0" codeset="10"/>
+    </diagcodelist>
+    <modcodelist/>
   </Results>
 </PPMDResults>
