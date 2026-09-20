@@ -81,7 +81,7 @@ its safety properties are structural instead:
 |---|---|
 | `portal/server.py` | MCP entry; one tool per flow, wired through the runner |
 | `portal/browser.py` | Shared persistent Playwright context |
-| `portal/flows/` | One module per scripted flow. `flows/claims_address.py` passively reads the unverified claims-specific legacy-card selectors (no carrier-detail click); `flows/eligibility.py` scrapes the read-only real-time eligibility (271) Details panel. Insurance merges both bounded field groups. Clicks ONLY "Details", NEVER "Check Eligibility" or a carrier lookup control |
+| `portal/flows/` | One module per scripted flow. `flows/claims_address.py` passively reads the unverified claims-specific legacy-card selectors (no carrier-detail click); `flows/eligibility.py` scrapes the read-only real-time eligibility (271) Details panel. Insurance merges both bounded field groups. `get_insurance_details` clicks ONLY "Details". The single exception is the owner-gated `check_eligibility` tool (mode `check_eligibility`), whose deterministic stage clicks "Check Eligibility"; the recovery LLM may never click it, and no flow touches a carrier lookup control |
 | `portal/flows/_runner.py` | `run_flow()`: timeout, re-login retry, checkpoints, deterministic `trace`, diagnosis enum |
 | `portal/graphs/insurance_graph.py` | **Reference LangGraph** — deterministic checkpoint nodes + `llm_recover` |
 | `portal/graphs/flow_support.py` | Recoverable-stage routing rules shared by flow graphs |
