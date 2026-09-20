@@ -331,6 +331,7 @@ async def test_getchargedetaildata_result_shape(registry, entry_queue):
     }
 
 
+
 # ------------------------------------------------- Appendix C defects
 
 
