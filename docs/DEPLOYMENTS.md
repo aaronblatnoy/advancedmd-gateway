@@ -29,6 +29,36 @@ host exposure; anything outside the `coolify` network cannot reach it.
 | Office key | Orlando Dermatology Center |
 | Reachability | Host `8820:8820` on black-sky (LAN/tailnet callers) |
 
+## Portal computer-use sidecar (orlando-derm office key)
+
+Playwright + LangGraph recovery run only on black-sky. Callers use the
+sidecar HTTP/MCP surface and never run a local browser.
+
+| | |
+|---|---|
+| Coolify app | `advancedmd-gateway-portal` (image: `Dockerfile.portal`) |
+| Status 2026-09-20 | **NOT deployed.** `main` has no `portal/` package; the sidecar lives on `dev`. |
+| Reachability | Host `100.94.62.115:8821:8821` (tailnet only, never bare `8821:8821`). Docker DNS `http://advancedmd-gateway-portal:8821`. |
+| Volumes | `/data` (token table) and `/root/.amd-playwright-profile` (persistent AMD login) |
+| Env | `AMD_USERNAME`, `AMD_PASSWORD`, `AMD_OFFICE_KEY`, `GATEWAY_TOKENS_PATH=/data/tokens.json`, `AMD_PORTAL_HEADLESS=1`, `PORTAL_LLM_BASE_URL=http://100.94.62.115:8000` (on-box llm-server; never a hosted model) |
+| Tools | `get_insurance_details`, `get_insurance_details_batch`, `portal_session_status`, `portal_login`, and the billable write `check_eligibility` |
+
+### Billable write: `check_eligibility` (appointment-validator)
+
+Decision: `memory/decisions/2026-09-14-portal-check-eligibility-write.md`.
+Three independent gates, all default deny:
+
+1. Sidecar env `AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1`.
+2. The caller's token on the SIDECAR's token table grants it:
+   `gateway tokens add appointment-validator --priority batch --phi --tools getreminderappts,getdemographic --portal-tools check_eligibility`.
+   The sidecar has its own `/data/tokens.json` unless a volume is shared
+   with the XML gateway; a token minted only on `:8820` is unknown to `:8821`.
+3. Request arg `confirm=true`.
+
+The first AMD portal login may need the owner (`portal_login`); confirm with
+`portal_session_status` before enabling the validator flag. Real-patient
+verification of the click is the owner's, on his screen (portal/CLAUDE.md rule 4).
+
 ## Data quirks observed live (Dermacare office key)
 
 - `getdatevisits`: `provider_name` and `provider_id` come back **empty**
