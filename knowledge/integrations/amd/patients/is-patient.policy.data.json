@@ -1,0 +1,40 @@
+{
+  "$schema": "amd-mcp-policy/v1",
+  "action": "is-patient",
+  "domain": "patients",
+  "tier": 3,
+  "tool_name": "amd_patients_is_patient",
+  "redact": {
+    "phi_fields": [],
+    "non_phi_keep": [
+      "is_patient",
+      "count",
+      "exactmatch",
+      "mode",
+      "matched_as"
+    ],
+    "strict_mode_patterns": []
+  },
+  "permission": {
+    "audience": [
+      "front_desk",
+      "admin",
+      "service"
+    ]
+  },
+  "audit": {
+    "always_log": false,
+    "log_when_phi_revealed": true
+  },
+  "write_action": false,
+  "permitted_actions": [
+    [
+      "lookuppatient",
+      {
+        "class_": [
+          "api"
+        ]
+      }
+    ]
+  ]
+}

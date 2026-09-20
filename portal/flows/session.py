@@ -24,10 +24,14 @@ def _safe_url(page: Page | None) -> str:
 
 async def portal_session_status(page: Page, checkpoints=None) -> dict:
     """Report whether a live authenticated app window is present (no login)."""
-    ctx = await browser.get_context()
-    app = browser.find_app_page(ctx)
-    live = bool(app is not None and await is_session_live(app))
-    url = _safe_url(app) if live else _safe_url(page)
+    from portal.flows._runner import Checkpoints
+
+    cp = checkpoints if checkpoints is not None else Checkpoints(capture=False)
+    async with cp.stage("session_probed", page):
+        ctx = await browser.get_context()
+        app = browser.find_app_page(ctx)
+        live = bool(app is not None and await is_session_live(app))
+        url = _safe_url(app) if live else _safe_url(page)
     log.info("flow=portal_session_status logged_in=%s", live)
     return {"logged_in": live, "url": url}
 

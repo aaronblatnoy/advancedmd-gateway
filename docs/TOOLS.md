@@ -2,7 +2,7 @@
 
 Consumer-facing reference for every tool the gateway serves over `POST /v1/tools` and over MCP `tools/call`.
 
-The gateway registers 74 tools: **48 read tools that are served** and **26 write-gated stubs** that are filtered out of `tools/list` while `WRITE_TOOLS_ENABLED=False` and raise `NotImplementedError` if invoked. The stubs are listed in a table at the end.
+The gateway registers 75 tools: **49 read tools that are served** and **26 write-gated stubs** that are filtered out of `tools/list` while `WRITE_TOOLS_ENABLED=False` and raise `NotImplementedError` if invoked. The stubs are listed in a table at the end.
 
 Companion documents: [API.md](API.md) for the HTTP envelope, auth, and error codes; [TOOL_TO_XML_MAP.md](TOOL_TO_XML_MAP.md) for the maintainer-level tool-to-AdvancedMD-XML ledger; [DEPLOYMENTS.md](DEPLOYMENTS.md) for live-key observations.
 
@@ -121,6 +121,30 @@ Search patients by name fragment or chart number; the primary way to resolve a n
 
 ```json
 {"tool": "amd_patients_lookup_patient", "args": {"query": "smith"}}
+```
+
+### `amd_patients_is_patient`
+
+*alias `ispatient` — AdvancedMD action `lookuppatient` — tier 3*
+
+Boolean probe: does this string match at least one AMD patient name? Same `lookuppatient` wire action as `amd_patients_lookup_patient`, but the match rows are dropped inside the handler. The result carries no query echo, no patient ids, no names, no DOB. Use it where the caller must not receive PHI (name detection, redaction, word-list checks); use `lookup_patient` to resolve a patient.
+
+**Arguments**
+
+| Name | Type | Required | Meaning |
+|---|---|---|---|
+| `name` | string | yes | The string to test. Punctuation stripped, upper-cased before the search. |
+| `exactmatch` | boolean | no | Default `true`. `false` allows AMD prefix matching (`al` hits `allen`). |
+| `mode` | string | no | `last` (default, one AMD call) or `both` (on no last-name hit, a second call tries the raw `,NAME` first-name query; unverified live). |
+
+**Result**
+
+`{is_patient, count, exactmatch, mode, matched_as}`. `matched_as` is `last`, `first`, or `null`. In `both` mode a fault on the second call is reported as `first_name_error` without failing the tool.
+
+**Example request**
+
+```json
+{"tool": "amd_patients_is_patient", "args": {"name": "smith"}}
 ```
 
 ### `amd_patients_get_master`

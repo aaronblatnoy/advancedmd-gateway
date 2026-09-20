@@ -304,6 +304,7 @@ def test_batch_items_are_whitelisted(monkeypatch):
     assert "RAW_PAGE_HTML" not in item
     allowed = set(insurance.FIELDS) | {
         "patient", "insurance_index", "index", "session_reestablished", "ok",
+        "trace",
     }
     assert set(item) <= allowed
 

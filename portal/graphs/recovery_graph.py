@@ -80,6 +80,7 @@ _STAGE_HINTS: dict[str, str] = {
     "insurance_card_open": "Goal: Insurance accordion card is expanded with the legacy iframe loaded.",
     "eligibility_details_open": "Goal: eligibility Details panel is open or closable blockers are gone.",
     "fields_scraped": "Goal: insurance card fields are visible for scraping.",
+    "claims_address_scraped": "Goal: the already-open insurance card is stable for passive claims-address reading; do not open carrier lookup controls.",
 }
 
 

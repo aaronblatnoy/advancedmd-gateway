@@ -1,5 +1,5 @@
 """Flow runner: timeout, session-expiry retry, structured errors,
-checkpoints, and failure diagnosis.
+checkpoints, human-readable traces, and failure diagnosis.
 
 Every MCP tool routes its flow through run_flow(). Guarantees:
 
@@ -10,10 +10,10 @@ Every MCP tool routes its flow through run_flow(). Guarantees:
       {"ok": false, "flow": name, "error": <exception class>,
        "message": <class/selector info only>,
        "diagnosis": <closed enum>, "next_action": <fixed string>,
-       "retryable": bool, "checkpoints": {...}, "run_id": ...,
-       "debug_screenshot": <local path or null>}
+       "retryable": bool, "checkpoints": {...}, "trace": [...],
+       "run_id": ..., "debug_screenshot": <local path or null>}
 - Successes return {"ok": true, "data": {...}, "checkpoints": {...},
-  "run_id": ...}.
+  "trace": [...], "run_id": ..., "meta": {...}}.
 - On failure a screenshot plus the page URL are saved locally under
   runtime/debug/ for Aaron's eyes only. Page text is never captured
   and never appears in logs or in the returned message.
@@ -26,6 +26,13 @@ AMD_PORTAL_CAPTURE=1 (console mode only; MCP mode leaves it unset) a
 screenshot per stage is saved under runtime/console/<run_id>/<stage>.png.
 Checkpoint names and messages are fixed strings: never page content,
 never the patient search string.
+
+Traces
+------
+Every result includes a top-level ``trace`` array of deterministic
+PHI-free sentences (see ``portal/flows/trace.py``). Stage pass/fail
+lines are appended automatically; use ``cp.note`` / ``cp.note_recovery``
+for non-stage events (session re-login, LLM recovery).
 """
 from __future__ import annotations
 
@@ -37,6 +44,8 @@ import re
 import time
 import uuid
 from pathlib import Path
+
+from . import trace as _trace
 
 log = logging.getLogger("amd_portal_mcp")
 
@@ -155,6 +164,9 @@ class Checkpoints:
     when AMD_PORTAL_CAPTURE=1) saves a per-stage screenshot under
     runtime/console/<run_id>/<stage>.png. Stage names are fixed strings
     from the flow code; nothing here ever carries page content.
+
+    Also accumulates deterministic human-readable ``trace`` lines (pass /
+    fail / note / recovery). See ``portal/flows/trace.py``.
     """
 
     def __init__(self, run_id: str | None = None, capture: bool | None = None):
@@ -172,13 +184,26 @@ class Checkpoints:
             / self.run_id
         )
         self.stages: dict[str, dict] = {}
+        self._trace: list[str] = []
 
     def stage(self, name: str, page=None) -> "_Stage":
         return _Stage(self, name, page)
 
+    def note(self, line: str) -> None:
+        """Append a fixed PHI-free sentence to the human-readable trace."""
+        if line:
+            self._trace.append(line)
+
+    def note_recovery(self, stage: str, *, cleared: bool) -> None:
+        self.note(_trace.format_recovery(stage, cleared=cleared))
+
+    def trace_lines(self) -> list[str]:
+        return list(self._trace)
+
     def reset(self) -> None:
         self.stages = {}
         self.recovery_steps = 0
+        self._trace = []
 
     @property
     def failed_stage(self) -> str | None:
@@ -221,8 +246,31 @@ class _Stage:
             "checkpoint=%s status=%s duration=%ss",
             self.name, rec["status"], rec["duration_s"],
         )
+        if exc_type is None:
+            self.cp.note(_trace.format_stage_pass(self.name))
+        else:
+            self.cp.note(_trace.format_stage_fail(self.name))
         await self._screenshot()
         return False  # never swallow
+
+
+def _attach_trace(
+    result: dict,
+    name: str,
+    cp: Checkpoints,
+    *,
+    ok: bool,
+    diagnosis: str | None = None,
+) -> dict:
+    """Prefix/suffix Started/Completed|Failed and set result['trace']."""
+    body = cp.trace_lines()
+    lines = [_trace.format_started(name), *body]
+    if ok:
+        lines.append(_trace.format_completed(name))
+    else:
+        lines.append(_trace.format_failed(name, diagnosis))
+    result["trace"] = lines
+    return result
 
 
 def _accepts_checkpoints(fn) -> bool:
@@ -273,6 +321,8 @@ async def _error(
             rec["status"] = "fail"
             if rec.get("duration_s") is None:
                 rec["duration_s"] = None
+            # __aexit__ never ran; emit the fail trace line here.
+            cp.note(_trace.format_stage_fail(stage_name))
     login_marker_present = False
     if not flow_timed_out:
         try:
@@ -285,18 +335,24 @@ async def _error(
         exc, cp.failed_stage, login_marker_present, flow_timed_out
     )
     debug_screenshot = await _save_debug(name, page)
-    return {
-        "ok": False,
-        "flow": name,
-        "error": type(exc).__name__,
-        "message": message or _safe_message(exc),
-        "diagnosis": diagnosis,
-        "next_action": DIAGNOSES[diagnosis]["next_action"],
-        "retryable": DIAGNOSES[diagnosis]["retryable"],
-        "checkpoints": cp.as_dict(),
-        "run_id": cp.run_id,
-        "debug_screenshot": debug_screenshot,
-    }
+    return _attach_trace(
+        {
+            "ok": False,
+            "flow": name,
+            "error": type(exc).__name__,
+            "message": message or _safe_message(exc),
+            "diagnosis": diagnosis,
+            "next_action": DIAGNOSES[diagnosis]["next_action"],
+            "retryable": DIAGNOSES[diagnosis]["retryable"],
+            "checkpoints": cp.as_dict(),
+            "run_id": cp.run_id,
+            "debug_screenshot": debug_screenshot,
+        },
+        name,
+        cp,
+        ok=False,
+        diagnosis=diagnosis,
+    )
 
 
 async def _save_debug(name: str, page) -> str | None:
@@ -376,13 +432,18 @@ async def run_flow(
     try:
         data = await asyncio.wait_for(coro_fn(page, **kwargs), timeout)
         log.info("flow=%s ok", name)
-        return {
-            "ok": True,
-            "data": data,
-            "checkpoints": cp.as_dict(),
-            "run_id": cp.run_id,
-            "meta": {"recovery_steps": cp.recovery_steps},
-        }
+        return _attach_trace(
+            {
+                "ok": True,
+                "data": data,
+                "checkpoints": cp.as_dict(),
+                "run_id": cp.run_id,
+                "meta": {"recovery_steps": cp.recovery_steps},
+            },
+            name,
+            cp,
+            ok=True,
+        )
     except asyncio.TimeoutError as exc:
         log.warning("flow=%s timed out after %ss", name, timeout)
         return await _error(
@@ -398,19 +459,29 @@ async def run_flow(
                     page, goal_stage=cp.failed_stage or "unknown"
                 )
                 cp.recovery_steps += recovery_steps
+                cp.note_recovery(
+                    cp.failed_stage or "unknown", cleared=recovered
+                )
                 if recovered:
                     try:
                         data = await asyncio.wait_for(
                             coro_fn(page, **kwargs), timeout
                         )
                         log.info("flow=%s ok after recovery", name)
-                        return {
-                            "ok": True,
-                            "data": data,
-                            "checkpoints": cp.as_dict(),
-                            "run_id": cp.run_id,
-                            "meta": {"recovery_steps": cp.recovery_steps},
-                        }
+                        return _attach_trace(
+                            {
+                                "ok": True,
+                                "data": data,
+                                "checkpoints": cp.as_dict(),
+                                "run_id": cp.run_id,
+                                "meta": {
+                                    "recovery_steps": cp.recovery_steps
+                                },
+                            },
+                            name,
+                            cp,
+                            ok=True,
+                        )
                     except Exception as exc_retry:
                         exc = exc_retry
             log.warning("flow=%s failed: %s", name, _safe_message(exc))
@@ -423,15 +494,21 @@ async def run_flow(
         cp.reset()
         try:
             await _login(page)
+            cp.note(_trace.format_session_relogin())
             data = await asyncio.wait_for(coro_fn(page, **kwargs), timeout)
             log.info("flow=%s ok after retry", name)
-            return {
-                "ok": True,
-                "data": data,
-                "checkpoints": cp.as_dict(),
-                "run_id": cp.run_id,
-                "meta": {"recovery_steps": cp.recovery_steps},
-            }
+            return _attach_trace(
+                {
+                    "ok": True,
+                    "data": data,
+                    "checkpoints": cp.as_dict(),
+                    "run_id": cp.run_id,
+                    "meta": {"recovery_steps": cp.recovery_steps},
+                },
+                name,
+                cp,
+                ok=True,
+            )
         except asyncio.TimeoutError as exc2:
             log.warning("flow=%s retry timed out", name)
             return await _error(

@@ -48,7 +48,12 @@ verified headless. No credentials or patient data belong in this file.
    `practicemanager/patientfiles/legacy_insurance.html`) that holds the
    actual insurance form and coverage grid. Its body can stay
    CSS-hidden, so the code waits for `state="attached"` only.
-9. The "Details" button in that legacy frame opens a separate
+9. Before opening Details, the flow passively checks the already-open legacy
+   card for claims-specific address inputs (checkpoint
+   `claims_address_scraped`). It does not click `#ellCarrier`: the likely
+   Carrier Master/detail route has not been mapped or established as
+   read-only-safe.
+10. The "Details" button in that legacy frame opens a separate
    `frmEligibilityDetails` iframe: the real-time eligibility (271) carrier
    response already ON FILE for the coverage. The flow now clicks Details
    (read-only display) and scrapes it (checkpoint `eligibility_details_open`;
@@ -92,6 +97,37 @@ login.advancedmd.com (outer page)
 
 Note: the portal has no "plan name" field on this panel; the old
 `plan_name` whitelist entry was dropped for the fields above.
+
+## Carrier claims address (passive best-inference scrape)
+
+No committed PHI-free structural capture currently names the carrier's
+claims/remit-address fields. The following candidate selectors mirror the
+legacy ASPX `#txt...` convention already confirmed above, but are
+**BEST-INFERENCE, UNVERIFIED — they need a live PHI-free structural capture
+before production use**:
+
+| Field | Candidate selectors |
+|---|---|
+| `claims_address_line1` | `#txtClaimsAddress1`, `#txtClaimAddress1` |
+| `claims_address_line2` | `#txtClaimsAddress2`, `#txtClaimAddress2` |
+| `claims_city` | `#txtClaimsCity`, `#txtClaimCity` |
+| `claims_state` | `#txtClaimsState`, `#txtClaimState` |
+| `claims_zip` | `#txtClaimsZipCode`, `#txtClaimZipCode`, `#txtClaimsZip`, `#txtClaimZip` |
+| `claims_carrier_name` | confirmed card selector `#ellCarrier input` |
+| `claims_payer_id` | confirmed card selector `#txtPayerID` |
+
+Generic address selectors are deliberately excluded because they could be
+the patient/subscriber home address. A complete line1/city/state/zip set is
+required before `claims_address_available=true`; line2 is optional. Missing
+or incomplete selectors return all-empty claims values and one closed
+`claims_address_reason`: `carrier_detail_not_opened`, `element_not_found`, or
+`selectors_not_verified`. The success reason is empty.
+
+Read-only boundary: this stage performs no clicks. The carrier ellipsis is
+the likely route to Carrier Master, but it will not be automated unless a
+live PHI-free capture shows exactly what it opens and Aaron confirms the
+control is display-only. The stage never clicks Check Eligibility, Save,
+Submit, Save Order, or Bypass.
 
 ## Eligibility (271) Details panel (frmEligibilityDetails)
 

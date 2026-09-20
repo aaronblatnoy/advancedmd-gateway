@@ -264,6 +264,22 @@ Two deterministic states are detected: the **no-data banner**
 and a whitelist of benefit fields is read by label (see
 `docs/insurance-flow.md` for the field list and the merge into the result).
 
+### 4.7 Carrier claims address  (stage: `claims_address_scraped`)
+
+Before the Details click, `flows/claims_address.py` passively inspects the
+already-open `legacy_insurance.html` frame for claims-specific address inputs.
+No committed live capture currently maps these nodes. The candidates
+(`#txtClaimsAddress1` / `#txtClaimAddress1`, corresponding line2/city/state,
+and zip variants) are **BEST-INFERENCE, UNVERIFIED — needs a live PHI-free
+structural capture session before production use**.
+
+The flow does not click `#ellCarrier` or attempt to open Carrier Master. The
+ellipsis is a likely detail route, but its read-only safety and resulting
+screen structure have not been established. Missing or incomplete selectors
+therefore produce a clean unavailable claims field group rather than an
+exception or a generic address read. Generic `#txtAddress...` selectors are
+excluded because they could be the patient's/subscriber's home address.
+
 ---
 
 ## 5. Consolidated selector table
@@ -304,6 +320,7 @@ Timing/quirk legend: **[seq]** must be typed via `press_sequentially`
 | termination_date | `#txtInsEndDate` | legacy frame | `input_value` |
 | copay | `#txtCopay` | legacy frame | `input_value` |
 | payer_id | `#txtPayerID` | legacy frame | `input_value` |
+| Claims address candidates | `#txtClaimsAddress1` / `#txtClaimAddress1` plus corresponding claims-specific line2/city/state/zip variants | legacy frame | **BEST-INFERENCE, UNVERIFIED**; passive only; complete line1/city/state/zip required |
 | eligibility_status | `#tblInsCoverages tr[data-selected='1'] td:last-child` (title attr) | legacy frame | from the selected coverage grid row |
 | eligibility_last_checked | `#tblInsCoverages tr[data-selected='1'] td:nth-child(7)` (text) | legacy frame | from the selected coverage grid row |
 | Details (271) button | role `button` `"Details"` | legacy frame | opens `frmEligibilityDetails`; **read-only display** — scraped |
@@ -404,6 +421,11 @@ Everything below is **not yet mapped** and needs a fresh codegen recording
   `Ins Order`, `Save Order`, `Elig STC`, `Check Eligibility`, `Bypass`,
   `Details`, and the `"Clearinghouse Website"` link. (`Check Eligibility`
   is almost certainly a write/billable action — treat as such.)
+- **Carrier Master/detail screen and claims/remit address.** The carrier
+  ellipsis `#ellCarrier` is a likely entry point, but the control's behavior,
+  resulting window/frame, and address selectors are unmapped. Automation
+  performs no click and uses only the explicitly marked passive inference
+  above until a PHI-free capture plus Aaron's review establishes safety.
 - **Right-side patient summary panel.** Fields observed
   (Patient/PCP/CHART#/MRN#/STATUS/INT/IMP/NAME/PRONOUNS/DOB/SSN/
   RESP PARTY/RELATIONSHIP) but no selectors pinned; nothing scrapes them.

@@ -1,8 +1,8 @@
 {
   "id": "policies-phi-redaction-fields",
   "title": "PHI fields stripped by the amd_mcp_common redactor",
-  "version": "1.0.0",
-  "last_updated": "2026-08-21",
+  "version": "1.1.0",
+  "last_updated": "2026-09-06",
   "source_documents": {
     "spec": "SPEC.md section 17.1 (data classification)",
     "getdemographic": "knowledge/reference/amd_api/patients/getdemographic.md",
@@ -65,6 +65,18 @@
         {"name": "subscriber_dob", "_source": "spec 17.1"},
         {"name": "group_number", "_source": "spec 17.1"},
         {"name": "policy_number", "_source": "spec 17.1"}
+      ]
+    },
+    "carrier_claims_address": {
+      "_note": "Carrier master data can be non-PHI alone, but these values are selected through and returned with a patient's coverage. Redact the association fail-closed if it traverses the shared gateway redactor; portal callers are separately bounded by the portal_tools allowlist and the fixed field whitelist.",
+      "fields": [
+        {"name": "claims_address_line1", "_source": "portal carrier claims-address field group tied to patient coverage"},
+        {"name": "claims_address_line2", "_source": "portal carrier claims-address field group tied to patient coverage"},
+        {"name": "claims_city", "_source": "portal carrier claims-address field group tied to patient coverage"},
+        {"name": "claims_state", "_source": "portal carrier claims-address field group tied to patient coverage"},
+        {"name": "claims_zip", "_source": "portal carrier claims-address field group tied to patient coverage"},
+        {"name": "claims_carrier_name", "_source": "portal carrier claims-address field group tied to patient coverage"},
+        {"name": "claims_payer_id", "_source": "portal carrier claims-address field group tied to patient coverage"}
       ]
     },
     "guarantor": {

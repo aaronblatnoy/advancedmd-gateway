@@ -189,6 +189,10 @@ class Caller:
     max_queue: int = 100
     created: str | None = None
     revoked: str | None = None
+    #: AMD username that minted this caller (login-gated mint). Never a password.
+    amd_username: str | None = None
+    #: sha256 of the office key used at mint — bind identity without storing the key.
+    office_key_hash: str | None = None
 
     @property
     def is_revoked(self) -> bool:

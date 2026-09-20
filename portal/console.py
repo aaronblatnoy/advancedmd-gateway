@@ -164,7 +164,11 @@ async def run_batch(req: BatchRequest):
                 "session_reestablished": bool(it.get("session_reestablished")),
                 "field_presence": {
                     f: bool(it.get(f))
-                    for f in (insurance.FIELDS + insurance.ELIGIBILITY_FIELDS)
+                    for f in (
+                        insurance.FIELDS
+                        + insurance.CLAIMS_ADDRESS_FIELDS
+                        + insurance.ELIGIBILITY_FIELDS
+                    )
                 } if it.get("ok") else None,
                 "diagnosis": it.get("diagnosis") if not it.get("ok") else None,
             })
@@ -359,6 +363,7 @@ _PAGE = """<!doctype html>
 <script>
 const STAGES = ["logged_in","app_ready","scheduler_open","patient_found",
   "patient_info_open","insurance_card_open","fields_scraped",
+  "claims_address_scraped",
   "eligibility_details_open"];
 let currentRun = null, currentPatient = null, pollTimer = null;
 

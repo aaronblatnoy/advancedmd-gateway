@@ -135,7 +135,7 @@ Current tools:
 
 | Tool | Role |
 |---|---|
-| `get_insurance_details` (alias `get_details`) | **Primary.** Insurance card + on-file 271 Details panel for one patient/coverage |
+| `get_insurance_details` (alias `get_details`) | **Primary.** Insurance card + passive carrier claims-address fields + on-file 271 Details panel for one patient/coverage |
 | `get_insurance_details_batch` | Same fields for many patients over one warm session |
 | `portal_login` (alias `login`) | Deterministic login / re-login if the session is closed or expired |
 | `portal_session_status` | Whether the browser session is logged in (probe only) |
@@ -254,13 +254,21 @@ Success shape:
   "ok": true,
   "data": { "...whitelisted fields..." },
   "checkpoints": { "scheduler_open": { "status": "pass", "duration_s": 1.2 }, "...": "..." },
+  "trace": [
+    "Started get_insurance_details",
+    "Opened Scheduler",
+    "Matched patient in scheduler search",
+    "Completed get_insurance_details"
+  ],
   "run_id": "...",
   "meta": { "recovery_steps": 0 }
 }
 ```
 
-Failure shape includes `diagnosis`, `next_action`, `retryable`, and
-checkpoint trail — never page HTML. See [docs/portal/testing.md](docs/portal/testing.md).
+``trace`` is the deterministic human-readable chronology (see
+[docs/portal/TRACES.md](docs/portal/TRACES.md)). Failure shape includes
+`diagnosis`, `next_action`, `retryable`, `checkpoints`, and `trace` —
+never page HTML. See [docs/portal/testing.md](docs/portal/testing.md).
 
 ### Test computer-use
 

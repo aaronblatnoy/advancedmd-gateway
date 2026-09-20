@@ -231,6 +231,13 @@ def test_insurance_returns_exact_whitelisted_keys(monkeypatch):
                 details[f] = []
             else:
                 details[f] = ""
+        for f in insurance.CLAIMS_ADDRESS_FIELDS:
+            if f == "claims_address_available":
+                details[f] = False
+            elif f == "claims_address_reason":
+                details[f] = "carrier_detail_not_opened"
+            else:
+                details[f] = ""
         details["patient"] = patient
         details["insurance_index"] = insurance_index
         return details
@@ -241,6 +248,8 @@ def test_insurance_returns_exact_whitelisted_keys(monkeypatch):
     )
     assert set(details) == set(insurance.FIELDS) | set(
         insurance.ELIGIBILITY_FIELDS
+    ) | set(
+        insurance.CLAIMS_ADDRESS_FIELDS
     ) | {
         "patient",
         "insurance_index",
@@ -248,6 +257,8 @@ def test_insurance_returns_exact_whitelisted_keys(monkeypatch):
     # Data-present fake: available True, not a no-data chart.
     assert details["eligibility_available"] is True
     assert details["eligibility_no_data"] is False
+    assert details["claims_address_available"] is False
+    assert details["claims_address_reason"] == "carrier_detail_not_opened"
     assert details["patient"] == "last, first"
     assert details["insurance_index"] == 2
     assert seen == {"patient": "last, first", "insurance_index": 2}

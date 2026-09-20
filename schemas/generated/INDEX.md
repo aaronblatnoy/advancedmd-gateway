@@ -41,6 +41,7 @@ jq -r '."x-amd-action".name' schemas/generated/patients/getdemographic.json
 | patients/getreminderappts.json | getreminderappts | patients | 2 | False | True |
 | patients/getupdatedpatients.json | getupdatedpatients | patients | 2 | False | True |
 | patients/lookup-patient.json | lookup-patient | patients | 3 | False | True |
+| patients/is-patient.json | is-patient | patients | 3 | False | True |
 | patients/savedemographic.json | savedemographic | patients | 2 | True | True |
 | patients/upddemographic.json | upddemographic | patients | 2 | True | True |
 | payments/addpayments.json | addpayments | payments | 2 | True | True |

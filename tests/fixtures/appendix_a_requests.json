@@ -14,7 +14,9 @@
     "alias": "getdemographic",
     "action": "getdemographic",
     "class": "demographics",
-    "attrs": ["patientid"],
+    "attrs": [
+      "patientid"
+    ],
     "children": [],
     "reply_fixture": "getdemographic.reply.xml"
   },
@@ -22,7 +24,13 @@
     "alias": "getreminderappts",
     "action": "getreminderappts",
     "class": "api",
-    "attrs": ["startdate", "enddate", "starttime", "endtime", "apptstatus"],
+    "attrs": [
+      "startdate",
+      "enddate",
+      "starttime",
+      "endtime",
+      "apptstatus"
+    ],
     "children": [],
     "reply_fixture": "getreminderappts.reply.xml"
   },
@@ -30,23 +38,37 @@
     "alias": "getdatevisits",
     "action": "getdatevisits",
     "class": "api",
-    "attrs": ["visitdate"],
-    "children": ["visit", "patient", "insurance"],
+    "attrs": [
+      "visitdate"
+    ],
+    "children": [
+      "visit",
+      "patient",
+      "insurance"
+    ],
     "reply_fixture": "getdatevisits.reply.xml"
   },
   "amd_visits_get_updated_visits": {
     "alias": "getupdatedvisits",
     "action": "getupdatedvisits",
     "class": "api",
-    "attrs": ["datechanged"],
-    "children": ["visit", "patient", "insurance"],
+    "attrs": [
+      "datechanged"
+    ],
+    "children": [
+      "visit",
+      "patient",
+      "insurance"
+    ],
     "reply_fixture": "getupdatedvisits.reply.xml"
   },
   "amd_patients_lookup_patient": {
     "alias": "lookuppatient",
     "action": "lookuppatient",
     "class": "api",
-    "attrs": ["name"],
+    "attrs": [
+      "name"
+    ],
     "children": [],
     "reply_fixture": "lookuppatient.reply.xml"
   },
@@ -55,15 +77,27 @@
     "action": "uploadfile",
     "class": "files",
     "attrs": [],
-    "children": ["file"],
+    "children": [
+      "file"
+    ],
     "reply_fixture": "uploadfile.reply.xml"
   },
   "amd_ehr_getehrnotes": {
     "alias": "getehrnotes",
     "action": "getehrnotes",
     "class": "api",
-    "attrs": ["patientid", "createdfrom", "createdto", "notedatefrom", "notedateto"],
-    "children": ["patientnote", "page", "field"],
+    "attrs": [
+      "patientid",
+      "createdfrom",
+      "createdto",
+      "notedatefrom",
+      "notedateto"
+    ],
+    "children": [
+      "patientnote",
+      "page",
+      "field"
+    ],
     "reply_fixture": "getehrnotes.reply.xml"
   },
   "amd_payments_get_tx_history": {
@@ -88,8 +122,21 @@
     "alias": "getchargedetaildata",
     "action": "getchargedetaildata",
     "class": "demographics",
-    "attrs": ["chargeid"],
+    "attrs": [
+      "chargeid"
+    ],
     "children": [],
     "reply_fixture": "getchargedetaildata.reply.xml"
+  },
+  "amd_patients_is_patient": {
+    "alias": "ispatient",
+    "action": "lookuppatient",
+    "class": "api",
+    "attrs": [
+      "exactmatch",
+      "name"
+    ],
+    "children": [],
+    "reply_fixture": "lookuppatient.reply.xml"
   }
 }

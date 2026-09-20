@@ -9,7 +9,14 @@ in order:
 
 `logged_in, app_ready, scheduler_open, patient_found,
 patient_info_open, insurance_card_open, fields_scraped,
+claims_address_scraped,
 eligibility_details_open`
+
+The `claims_address_scraped` stage is passive: it reads only
+claims-specific, best-inference selectors in the already-open legacy card.
+It does not click the carrier ellipsis/detail control. Missing or incomplete
+selectors are a passed checkpoint with `claims_address_available=false` and
+a closed reason, not a flow failure.
 
 The `eligibility_details_open` stage covers clicking the legacy frame's
 "Details" button and opening the read-only eligibility (271) panel
@@ -27,7 +34,7 @@ are fixed strings: never page content, never the patient search string.
 Success:
 
 ```json
-{"ok": true, "data": {...}, "checkpoints": {...}, "run_id": "..."}
+{"ok": true, "data": {...}, "checkpoints": {...}, "trace": [...], "run_id": "..."}
 ```
 
 Failure:
@@ -35,8 +42,12 @@ Failure:
 ```json
 {"ok": false, "flow": "...", "error": "...", "message": "...",
  "diagnosis": "...", "next_action": "...", "retryable": true,
- "checkpoints": {...}, "run_id": "...", "debug_screenshot": "..."}
+ "checkpoints": {...}, "trace": [...], "run_id": "...", "debug_screenshot": "..."}
 ```
+
+``trace`` is required on every computer-use tool result — ordered PHI-free
+deterministic sentences of what the automation did. See
+[TRACES.md](TRACES.md).
 
 Each checkpoint entry is
 `{"status": "pass"|"fail"|"running", "duration_s": N, "screenshot"?: path}`.

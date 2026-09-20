@@ -91,6 +91,12 @@ _FALLBACK_PHI_KEYS = frozenset({
     "subscriber_number",
     "subscriber_firstname", "subscriber_lastname", "subscriber_dob",
     "group_number", "policy_number",
+    # Carrier claims-address values are operational master data in isolation,
+    # but this result group is selected through a patient's coverage. Treat the
+    # association fail-closed if it ever traverses the shared redactor.
+    "claims_address_line1", "claims_address_line2",
+    "claims_city", "claims_state", "claims_zip",
+    "claims_carrier_name", "claims_payer_id",
     "guarantor_firstname", "guarantor_lastname",
     "guarantor_dob", "guarantor_address",
     "guarantor_phone", "guarantor_ssn",

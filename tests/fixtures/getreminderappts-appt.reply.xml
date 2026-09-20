@@ -1,0 +1,18 @@
+<!-- synthetic fixture - hand-written from reference client XML shapes, contains no real patient data -->
+<PPMDResults>
+  <Results success="1">
+    <apptlist>
+      <appt id="800001" startdate="6/1/2026" starttime="9:00 AM"
+            location="ORLANDO OFFICE" providerprofiledesc="DR TEST ONE"
+            primaryappttype="MOHS SURGERY">
+        <patient id="900001" firstname="TESTPATIENT" lastname="ALPHA"
+                 middlename="Q" chart="CH900001"/>
+      </appt>
+      <appt id="800002" startdate="6/1/2026" starttime="1:50PM"
+            location="WINTER PARK" providerprofiledesc="DR TEST TWO"
+            primaryappttype="FOLLOW UP">
+        <patient id="900002" firstname="TESTPATIENT" lastname="BETA"/>
+      </appt>
+    </apptlist>
+  </Results>
+</PPMDResults>

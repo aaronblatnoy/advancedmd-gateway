@@ -51,3 +51,28 @@ bounded, whitelisted dict as `{"ok": true, "data": {...}}`.
 
 If a flow fails, check `runtime/debug/` for the failure screenshot and
 page URL (local only, gitignored).
+
+## Claims-address verification capture (operator only)
+
+The carrier claims-address candidates in `flows/claims_address.py` are
+best-inference and unverified. Before trusting them in production, Aaron must
+perform a PHI-free structural capture against a synthetic/test patient:
+
+1. Open the patient's selected Insurance card and inspect the nested
+   `legacy_insurance.html` frame for the carrier's explicit "send claims to"
+   / claims / remit address labels and exact input ids. Confirm the values are
+   carrier mailing fields, not patient or subscriber address fields.
+2. Record the exact selectors for street line 1, optional line 2, city, state,
+   ZIP, carrier name, and payer id, plus their containing frame.
+3. If the fields are not on the card, manually inspect what `#ellCarrier`
+   opens and whether the control is display-only. Record the resulting
+   window/frame name, the Carrier Master/detail heading, the claims/remit
+   labels and selectors, and every nearby write control. Do not automate that
+   click until Aaron has reviewed and approved it as read-only-safe.
+4. Update the selector block and its mapped date, keep the whitelist bounded,
+   and run the console against only the synthetic/test patient to compare each
+   claims field before production use.
+
+Never capture or commit values, screenshots, page text, credentials, patient
+search strings, or other PHI; retain only reviewed structural selectors and
+labels.

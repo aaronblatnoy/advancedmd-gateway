@@ -19,7 +19,7 @@ Conventions used below:
 | amd-codes-mcp | amd_codes_lookup_cpt, amd_codes_lookup_hcpcs, amd_codes_lookup_icd10, amd_codes_lookup_modcode, amd_codes_lookupproccode, amd_codes_lookupdiagcode, amd_codes_lookupmodcode | 7 |
 | amd-ehr-mcp | amd_ehr_getehrallergies, amd_ehr_getehrccdadata, amd_ehr_getehrccdadocument, amd_ehr_getehrhwplans, amd_ehr_getehrimmunizations, amd_ehr_getehrlabresults, amd_ehr_getehrmedications, amd_ehr_getehrnotes, amd_ehr_getehrnotesbyvisit, amd_ehr_getehrproblems, amd_ehr_getehrprofiles, amd_ehr_getehrtemplates, amd_ehr_getehrupdatednotes, amd_ehr_saveehrccdadata (stub), amd_ehr_saveehrccdadocument (stub), amd_ehr_updateehrhwplans (stub), amd_ehr_updateehrnote (stub), amd_ehr_updateehrproblem (stub), amd_ehr_addehrhwplans (stub), amd_ehr_addehrnote (stub), amd_ehr_addehrnotebyvisit (stub), amd_ehr_addehrproblem (stub) | 22 |
 | amd-masterfiles-mcp | amd_masterfiles_lookupaccttype, amd_masterfiles_lookupcarrier, amd_masterfiles_lookupfinclass, amd_masterfiles_lookupnotetypes, amd_masterfiles_lookupzipcode, amd_masterfiles_savenotetypes (stub), amd_masterfiles_selectdiagnosiscodes, amd_masterfiles_selectfacilities, amd_masterfiles_selectuserfiletemplates | 9 |
-| amd-patients-mcp | amd_patients_get_demographic, amd_patients_get_updated_patients, amd_patients_lookup_patient, amd_patients_get_master, amd_patients_get_patient_visits, amd_patients_get_reminder_appts, amd_patients_save_demographic (stub), amd_patients_upd_demographic (stub), amd_patients_getcustomdata, amd_patients_getreminderpatientbirthdays, amd_patients_lookuprespparty, amd_patients_addpatient (stub), amd_patients_updatepatient (stub), amd_patients_addinsurance (stub), amd_patients_updateinsurance (stub), amd_patients_savepatientnotes (stub), amd_patients_addrespparty (stub), amd_patients_addreferral (stub), amd_patients_updatereferral (stub), amd_patients_uploadfile (stub) | 20 |
+| amd-patients-mcp | amd_patients_get_demographic, amd_patients_get_updated_patients, amd_patients_lookup_patient, amd_patients_is_patient, amd_patients_get_master, amd_patients_get_patient_visits, amd_patients_get_reminder_appts, amd_patients_save_demographic (stub), amd_patients_upd_demographic (stub), amd_patients_getcustomdata, amd_patients_getreminderpatientbirthdays, amd_patients_lookuprespparty, amd_patients_addpatient (stub), amd_patients_updatepatient (stub), amd_patients_addinsurance (stub), amd_patients_updateinsurance (stub), amd_patients_savepatientnotes (stub), amd_patients_addrespparty (stub), amd_patients_addreferral (stub), amd_patients_updatereferral (stub), amd_patients_uploadfile (stub) | 21 |
 | amd-payments-mcp | amd_payments_get_tx_history, amd_payments_add_payments (stub) | 2 |
 | amd-providers-mcp | amd_providers_get_updated_providers, amd_providers_get_updated_referring_providers, amd_providers_lookupprofile, amd_providers_lookup_provider, amd_providers_lookuprefprovider | 5 |
 | amd-system-mcp | amd_system_getsysdefaults | 1 |
@@ -1150,6 +1150,22 @@ asserts each handler's `XmlRequest` against.
   already carries `tier: 1`, and `gateway/registry.default_tier_for`
   returns 1. The handler's `TIER = 2` constant is ignored per SPEC 7.4; a
   unit test pins both.
+
+## verification-ledger-ispatient
+
+- Tool: `amd_patients_is_patient` (alias `ispatient`), patients
+- Request: action `lookuppatient` (one word), class `api`, attrs `name`
+  (the cleaned, upper-cased string) and `exactmatch` (default on). No
+  children. Shares lookup_patient's wire action; the alias is the tool's
+  short name because the verification table keys aliases uniquely.
+  `mode=both` issues a second `lookuppatient` with `name=,STRING` when
+  the first returns nothing.
+- Live check: **PENDING OPERATOR**
+- Fixture: `tests/fixtures/lookuppatient.reply.xml` (shared)
+- Result shape: `{is_patient, count, exactmatch, mode, matched_as}` and
+  nothing else. Match rows are dropped in the handler; no query echo.
+- Tier: 3
+- Defects fixed: none.
 
 ## verification-ledger-lookuppatient
 

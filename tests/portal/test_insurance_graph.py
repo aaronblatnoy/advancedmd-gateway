@@ -1,6 +1,8 @@
 """Tests for insurance LangGraph orchestration."""
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from portal.flows._runner import BlockingDialogError, Checkpoints
@@ -43,8 +45,12 @@ async def test_graph_retries_stage_after_llm_recover(monkeypatch):
     async def fake_read(frame):
         return {"eligibility_available": False}
 
+    async def fake_claims(ins):
+        return {"claims_address_available": False}
+
     monkeypatch.setattr(ig, "open_eligibility_frame", fake_open_elig)
     monkeypatch.setattr(ig, "read_eligibility_from_frame", fake_read)
+    monkeypatch.setattr(ig, "scrape_claims_address", fake_claims)
     monkeypatch.setattr("portal.graphs.recovery_graph.run_recovery", fake_recovery)
 
     cp = Checkpoints(capture=False)
@@ -82,3 +88,45 @@ async def test_graph_navigation_only_stops_before_scrape(monkeypatch):
     assert flow.app is not None
     assert flow.ins is not None
     assert scraped["called"] is False
+
+
+@pytest.mark.asyncio
+async def test_graph_merges_claims_address_field_group(monkeypatch, caplog):
+    monkeypatch.setattr(ig, "stage_session_and_scheduler", _noop_stage)
+    monkeypatch.setattr(ig, "stage_patient_found", _noop_stage)
+    monkeypatch.setattr(ig, "stage_patient_info_open", _noop_stage)
+
+    async def fake_card(flow: InsuranceFlowState):
+        flow.app = object()
+        flow.ins = object()
+
+    async def fake_scrape(ins):
+        return {"carrier_name": "Synthetic Carrier"}
+
+    async def fake_claims(ins):
+        return {
+            "claims_address_available": True,
+            "claims_address_line1": "123 Synthetic Claims Road",
+        }
+
+    async def fake_open_elig(app, ins):
+        return None
+
+    async def fake_read(frame):
+        return {"eligibility_available": False}
+
+    monkeypatch.setattr(ig, "stage_insurance_card_open", fake_card)
+    monkeypatch.setattr("portal.flows.insurance._scrape_fields", fake_scrape)
+    monkeypatch.setattr(ig, "scrape_claims_address", fake_claims)
+    monkeypatch.setattr(ig, "open_eligibility_frame", fake_open_elig)
+    monkeypatch.setattr(ig, "read_eligibility_from_frame", fake_read)
+
+    cp = Checkpoints(capture=False)
+    with caplog.at_level(logging.INFO, logger="portal.graphs.insurance"):
+        data = await ig.run_get_insurance_details_graph(
+            object(), "Test, Synthetic", checkpoints=cp
+        )
+    assert data["claims_address_available"] is True
+    assert data["claims_address_line1"] == "123 Synthetic Claims Road"
+    assert cp.as_dict()["claims_address_scraped"]["status"] == "pass"
+    assert "123 Synthetic Claims Road" not in caplog.text

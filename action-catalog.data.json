@@ -91,6 +91,42 @@
       }
     },
     {
+      "name": "is-patient",
+      "domain": "patients",
+      "key": "lookuppatient",
+      "class_": "api",
+      "tier": 3,
+      "write": false,
+      "doc": "Boolean probe: does this string match at least one AMD patient name? Same lookuppatient wire action as lookup_patient, but match rows are dropped in the handler. Returns is_patient, count, exactmatch, mode, matched_as (last|first|null). No query echo, no ids, no names, no DOB. Use for PHI-free name detection; use lookup_patient to resolve a patient.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The string to test as a patient name. Punctuation is stripped and it is upper-cased before the search."
+          },
+          "exactmatch": {
+            "type": "boolean",
+            "default": true,
+            "description": "Exact last-name match (default). False allows AMD prefix matching."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "last",
+              "both"
+            ],
+            "default": "last",
+            "description": "last: test as a last name (one AMD call). both: on no last-name hit, also test as a first name via the raw ',NAME' query (second call; unverified live)."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
       "name": "getmaster-patient",
       "domain": "patients",
       "key": "getmaster",

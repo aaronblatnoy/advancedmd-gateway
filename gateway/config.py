@@ -40,6 +40,11 @@ REQUIRED: tuple[str, ...] = (
     "AMD_USERNAME",
     "AMD_PASSWORD",
     "AMD_OFFICE_KEY",
+)
+
+# At least one of these must be set (DB preferred).
+_TOKEN_PATH_VARS: tuple[str, ...] = (
+    "GATEWAY_TOKENS_DB_PATH",
     "GATEWAY_TOKENS_PATH",
 )
 
@@ -156,12 +161,21 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         raise ConfigError(
             "missing required configuration: " + ", ".join(sorted(missing))
         )
+    tokens_path = (
+        env.get("GATEWAY_TOKENS_DB_PATH", "").strip()
+        or env.get("GATEWAY_TOKENS_PATH", "").strip()
+    )
+    if not tokens_path:
+        raise ConfigError(
+            "missing required configuration: GATEWAY_TOKENS_DB_PATH "
+            "or GATEWAY_TOKENS_PATH"
+        )
 
     cfg = Config(
         amd_username=env["AMD_USERNAME"].strip(),
         amd_password=env["AMD_PASSWORD"],
         amd_office_key=env["AMD_OFFICE_KEY"].strip(),
-        gateway_tokens_path=env["GATEWAY_TOKENS_PATH"].strip(),
+        gateway_tokens_path=tokens_path,
         amd_app_name=_get(env, "AMD_APP_NAME").strip() or "TEMP",
         amd_base_url=_get(env, "AMD_BASE_URL").strip(),
         gateway_port=_as_int(env, "GATEWAY_PORT"),

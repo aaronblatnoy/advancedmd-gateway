@@ -163,6 +163,10 @@ LAUNCH_SET: Mapping[str, VerifiedTool] = {
              "visits", 1, "getupdatedvisits.reply.xml"),
         _row("amd_patients_lookup_patient", "lookuppatient",
              "patients", 3, "lookuppatient.reply.xml"),
+        # Same wire action as lookup_patient; the alias must be unique in
+        # the table, so it is the tool's short name, not the AMD action.
+        _row("amd_patients_is_patient", "ispatient",
+             "patients", 3, "lookuppatient.reply.xml"),
         _row("amd_patients_uploadfile", "uploadfile",
              "patients", 2, "uploadfile.reply.xml", write_action=True),
         _row("amd_ehr_getehrnotes", "getehrnotes",

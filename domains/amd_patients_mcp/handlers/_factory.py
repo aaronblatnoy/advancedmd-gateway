@@ -26,6 +26,7 @@ from . import (
     getreminderappts,
     getupdatedpatients,
     lookup_patient,
+    is_patient,
     savedemographic,
     upddemographic,
     # E1 additions per AMD_TOOLS_FULL_BUILDOUT_PLAN-final.txt
@@ -49,6 +50,7 @@ _HANDLER_MODULES: tuple = (
     getdemographic,
     getupdatedpatients,
     lookup_patient,
+    is_patient,
     getmaster_patient,
     getpatientvisits,
     getreminderappts,

@@ -52,6 +52,7 @@ __all__ = [
     "TokenError",
     "generate_token",
     "hash_token",
+    "sanitize_caller_name",
     "TokenTable",
     "main",
 ]
@@ -102,6 +103,18 @@ def _check_name(name: str) -> None:
         raise TokenError(
             "caller name must be lowercase letters, digits and hyphens"
         )
+
+
+def sanitize_caller_name(username: str) -> str:
+    """Map an AMD username onto a SPEC 10.1 caller name."""
+    raw = (username or "").strip().lower()
+    cleaned = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    if not cleaned:
+        raise TokenError("caller name could not be derived from username")
+    if cleaned[0].isdigit():
+        cleaned = f"u-{cleaned}"
+    return cleaned[:64]
+
 
 
 # ------------------------------------------------------------ table
@@ -179,6 +192,16 @@ def _parse_caller(entry: Mapping[str, Any]) -> tuple[str, Caller]:
         max_queue=int(max_queue),
         created=entry.get("created"),
         revoked=entry.get("revoked"),
+        amd_username=(
+            str(entry["amd_username"]).strip()
+            if entry.get("amd_username")
+            else None
+        ),
+        office_key_hash=(
+            str(entry["office_key_hash"]).strip()
+            if entry.get("office_key_hash")
+            else None
+        ),
     )
     return hashed, caller
 
@@ -199,6 +222,8 @@ def _serialize_caller(hashed: str, caller: Caller) -> dict[str, Any]:
         "max_queue": caller.max_queue,
         "created": caller.created,
         "revoked": caller.revoked,
+        "amd_username": caller.amd_username,
+        "office_key_hash": caller.office_key_hash,
     }
 
 
@@ -246,9 +271,23 @@ class TokenTable:
     def load(self) -> None:
         """Read the table from disk. Raises TokenError on a bad file.
 
-        A missing file is an error at startup (SPEC 16.1): the gateway
-        must not come up with an empty, silently-deny-everything table.
+        JSON paths: a missing file is an error at startup (legacy SPEC 16.1).
+        SQLite paths: a missing file is created empty so mint can bootstrap.
         """
+        from gateway.token_store import SqliteTokenStore, TokenStoreError, is_sqlite_path
+
+        if is_sqlite_path(self.path):
+            store = SqliteTokenStore(self.path)
+            if not self.path.exists():
+                store.ensure()
+            try:
+                self._by_hash = store.load()
+            except TokenStoreError as exc:
+                raise TokenError(str(exc)) from None
+            self._mtime = self._stat_mtime()
+            self._last_check = self._monotonic()
+            return
+
         try:
             text = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -385,7 +424,14 @@ class TokenTable:
         return count
 
     def _write(self) -> None:
-        """Atomic replace, owner-readable only. The file holds hashes."""
+        """Atomic replace. The store holds hashes only — never plaintext."""
+        from gateway.token_store import SqliteTokenStore, is_sqlite_path
+
+        if is_sqlite_path(self.path):
+            SqliteTokenStore(self.path).replace_all(self._by_hash)
+            self._mtime = self._stat_mtime()
+            return
+
         document = {
             "callers": [
                 _serialize_caller(h, c) for h, c in self._by_hash.items()
@@ -409,8 +455,16 @@ class TokenTable:
         create: bool = False,
         write_tools_enabled: bool = False,
     ) -> "TokenTable":
+        from gateway.token_store import SqliteTokenStore, is_sqlite_path
+
         table = cls(path, write_tools_enabled=write_tools_enabled)
-        if create and not Path(path).exists():
+        path_obj = Path(path)
+        if is_sqlite_path(path_obj):
+            if create or not path_obj.exists():
+                SqliteTokenStore(path_obj).ensure()
+            table.load()
+            return table
+        if create and not path_obj.exists():
             table._write()
         else:
             table.load()
@@ -421,8 +475,9 @@ class TokenTable:
 
 
 def _row_for_list(caller: Caller) -> dict[str, Any]:
-    """SPEC 10.2: names and policy, NEVER hashes."""
+    """SPEC 10.2: names and policy, NEVER hashes or office_key_hash."""
     row = asdict(caller)
+    row.pop("office_key_hash", None)
     row["priority"] = PRIORITY_NAMES[caller.priority]
     row["tools"] = "*" if caller.tools == "*" else list(caller.tools)
     row["portal_tools"] = (
@@ -468,7 +523,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tokens-path",
         default=None,
-        help="token table JSON (default: GATEWAY_TOKENS_PATH)",
+        help="token table path (.json legacy or .db SQLite; default: "
+        "GATEWAY_TOKENS_DB_PATH or GATEWAY_TOKENS_PATH)",
     )
     sub = parser.add_subparsers(dest="group", required=True)
     tokens = sub.add_parser("tokens", help="manage caller tokens")
@@ -506,11 +562,40 @@ def main(argv: Sequence[str] | None = None, *, stdout: Any = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    path = args.tokens_path or os.environ.get("GATEWAY_TOKENS_PATH", "")
+    path = (
+        args.tokens_path
+        or os.environ.get("GATEWAY_TOKENS_DB_PATH", "")
+        or os.environ.get("GATEWAY_TOKENS_PATH", "")
+    )
     if not path:
-        print("GATEWAY_TOKENS_PATH is not set and --tokens-path was not given",
-              file=sys.stderr)
+        print(
+            "GATEWAY_TOKENS_DB_PATH / GATEWAY_TOKENS_PATH is not set "
+            "and --tokens-path was not given",
+            file=sys.stderr,
+        )
         return 2
+
+    # One-shot JSON -> SQLite import when both are configured and DB is empty.
+    json_path = os.environ.get("GATEWAY_TOKENS_PATH", "").strip()
+    db_path = os.environ.get("GATEWAY_TOKENS_DB_PATH", "").strip()
+    if (
+        not args.tokens_path
+        and db_path
+        and json_path
+        and Path(json_path).exists()
+        and (not Path(db_path).exists() or Path(db_path).stat().st_size == 0)
+    ):
+        from gateway.token_store import SqliteTokenStore
+
+        try:
+            document = json.loads(Path(json_path).read_text(encoding="utf-8"))
+            store = SqliteTokenStore(db_path)
+            store.ensure()
+            parsed = TokenTable.parse(document)
+            store.replace_all(parsed)
+            print(f"imported {len(parsed)} caller(s) from JSON into SQLite", file=out)
+        except (OSError, json.JSONDecodeError, TokenError) as exc:
+            print(f"JSON import skipped: {exc}", file=sys.stderr)
 
     try:
         table = TokenTable.open(path, create=(args.action == "add"))
