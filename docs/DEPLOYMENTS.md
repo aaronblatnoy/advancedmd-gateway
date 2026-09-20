@@ -37,8 +37,8 @@ sidecar HTTP/MCP surface and never run a local browser.
 | | |
 |---|---|
 | Coolify app | `advancedmd-gateway-portal` (image: `Dockerfile.portal`) |
-| Status 2026-09-20 | **NOT deployed.** `main` has no `portal/` package; the sidecar lives on `dev`. |
-| Reachability | Host `100.94.62.115:8821:8821` (tailnet only, never bare `8821:8821`). Docker DNS `http://advancedmd-gateway-portal:8821`. |
+| Status 2026-09-20 | Coolify app `sljau13dmwwgmalxb2ites6k`, built from branch `dev` (`main` has no `portal/` package yet). |
+| Reachability | **No host port.** Coolify rejects an IP-prefixed `ports_mappings`, and a bare `8821:8821` would bind every interface. Containers use Docker DNS `http://advancedmd-gateway-portal:8821`; host jobs (the nightly validator) resolve the container's `coolify`-network IP at launch. |
 | Volumes | `/data` (token table) and `/root/.amd-playwright-profile` (persistent AMD login) |
 | Env | `AMD_USERNAME`, `AMD_PASSWORD`, `AMD_OFFICE_KEY`, `GATEWAY_TOKENS_PATH=/data/tokens.json`, `AMD_PORTAL_HEADLESS=1`, `PORTAL_LLM_BASE_URL=http://100.94.62.115:8000` (on-box llm-server; never a hosted model) |
 | Tools | `get_insurance_details`, `get_insurance_details_batch`, `portal_session_status`, `portal_login`, and the billable write `check_eligibility` |
