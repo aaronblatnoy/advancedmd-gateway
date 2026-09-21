@@ -1,7 +1,7 @@
 # advancedmd-gateway
 
 advancedmd-gateway is a single service that sits between your apps and
-AdvancedMD. The purpose of this gateway is to handle high volumes of API calls and tool calls on a rate limited system. 
+AdvancedMD. The purpose of this gateway is to handle high volumes of API calls and tool calls on a rate limited system and to introduce new 'computer use tools' which unlock functionality that isn't in the API documentation. 
 
 Apps never hold AdvancedMD passwords or talk to AdvancedMD directly. They
 send authenticated tool requests to the gateway and get structured JSON
