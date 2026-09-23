@@ -282,6 +282,11 @@ async def fire_check_eligibility(
     if readable and await _has_no_data(frame):
         stable = await _wait_no_data_stable(frame, hold_s=nodata_confirm_s)
         log.info("flow=eligibility check no-data banner stable=%s", stable)
+        # Six-for-six no-data after a click is not a payer pattern. Record
+        # what the panel offers (fixed labels only) so the click target and
+        # any service-type / confirm control can be identified.
+        await _log_structure(frame, "after-click")
+        await _log_controls(frame)
 
 
 async def _body_fingerprint(frame) -> tuple[int, int]:
@@ -465,6 +470,39 @@ _STRUCTURE_PROBE_JS = r"""
   return out;
 }
 """
+
+
+_CONTROLS_PROBE_JS = r"""
+() => {
+  const q = s => document.querySelectorAll(s).length;
+  const vis = s => Array.from(document.querySelectorAll(s)).filter(e => e.offsetParent !== null).length;
+  const btnLabels = Array.from(document.querySelectorAll('button'))
+    .map(b => (b.getAttribute('aria-label') || b.textContent || '').replace(/\s+/g,' ').trim())
+    .filter(t => t && t.length <= 24 && /^[A-Za-z ._-]+$/.test(t)).slice(0, 10);
+  return {
+    buttons: q('button'), buttons_visible: vis('button'), selects: q('select,mat-select,[role=combobox],[role=listbox]'),
+    dialogs: vis('[role=dialog],.modal,mat-dialog-container'), loading: q('.amds-loading-text'),
+    inputs: q('input'), labels: btnLabels
+  };
+}
+"""
+
+
+async def _log_controls(frame) -> None:
+    """PHI-free counts of controls in the eligibility panel + button labels."""
+    try:
+        c = await frame.evaluate(_CONTROLS_PROBE_JS)
+    except Exception as exc:
+        log.info("flow=eligibility controls probe_failed=%s", type(exc).__name__)
+        return
+    if not isinstance(c, dict):
+        return
+    labels = " | ".join(str(x) for x in (c.get("labels") or []))[:120]
+    log.info(
+        "flow=eligibility controls buttons=%s visible=%s selects=%s dialogs=%s loading=%s inputs=%s labels=%s",
+        c.get("buttons"), c.get("buttons_visible"), c.get("selects"), c.get("dialogs"),
+        c.get("loading"), c.get("inputs"), labels,
+    )
 
 
 async def _log_structure(root, where: str) -> None:
