@@ -430,21 +430,17 @@ async def scrape_eligibility_details(app, ins, checkpoints=None) -> dict:
     return await read_eligibility_from_frame(frame)
 
 
+# Only controls that plausibly belong to the Details panel itself. Tab-strip
+# closers are deliberately NOT here: hitting one closes the Scheduler tab.
 _ELIGIBILITY_CLOSE_SELECTORS = (
     "i.amds-click-out-x",
     '[class*="click-out"]',
     'button[aria-label="Close"]',
     '[aria-label="Close"]',
-    '[aria-label="close"]',
     'mat-icon:has-text("close")',
     ".modal-header .close",
     '[class*="close-button"]',
-    '[class*="closeButton"]',
     'button:has-text("Close")',
-    'button:has-text("Done")',
-    'button:has-text("Cancel")',
-    ".amds-tab-close",
-    ".tab .close",
 )
 
 _STRUCTURE_PROBE_JS = r"""
@@ -507,6 +503,10 @@ async def close_eligibility_panel(app) -> bool:
                         if await item.is_visible():
                             await item.click(timeout=2500)
                             clicked = True
+                            log.info(
+                                "flow=eligibility panel close clicked selector=%s in=%s",
+                                sel, "app" if root is app else "frame",
+                            )
                             break
                     except Exception:
                         continue

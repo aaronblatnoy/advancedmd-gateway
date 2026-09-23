@@ -108,26 +108,70 @@ async def reset_to_scheduler(app: Page) -> dict:
     await dismiss_blocking_dialogs(app)
 
     search_cleared = False
-    try:
-        await app.get_by_title("Scheduler").click(timeout=8000)
-        sched = app.frame_locator('iframe[name="frmScheduler"]')
-        search = sched.get_by_role("combobox", name="Search for patient")
-        await search.wait_for(state="visible", timeout=8000)
+    reloaded = False
+    for attempt in range(2):
         try:
-            await search.fill("", timeout=4000)
-            search_cleared = True
+            await app.get_by_title("Scheduler").click(timeout=8000)
+            sched = app.frame_locator('iframe[name="frmScheduler"]')
+            search = sched.get_by_role("combobox", name="Search for patient")
+            await search.wait_for(state="visible", timeout=8000)
+            try:
+                await search.fill("", timeout=4000)
+                search_cleared = True
+            except Exception:
+                search_cleared = False
+            break
         except Exception:
-            search_cleared = False
-    except Exception:
-        # Scheduler not reachable yet; the insurance flow's own
-        # scheduler_open stage (with retries) will recover.
-        pass
+            if attempt == 0:
+                # The scheduler view can be left unusable by a previous flow
+                # (a closed tab, a navigated iframe). A reload of the app
+                # shell keeps the session cookie and rebuilds the chrome.
+                await _log_scheduler_state(app, "before-reload")
+                try:
+                    await app.reload(wait_until="domcontentloaded", timeout=30000)
+                    await app.get_by_title("Scheduler").wait_for(
+                        state="visible", timeout=30000
+                    )
+                    reloaded = True
+                    await dismiss_blocking_dialogs(app)
+                except Exception as exc:
+                    log.info("flow=reset_to_scheduler reload failed type=%s", type(exc).__name__)
+                    break
+            # else: the insurance flow's own scheduler_open stage retries.
 
     log.info(
-        "flow=reset_to_scheduler panels_closed=%s search_cleared=%s",
-        panels_closed, search_cleared,
+        "flow=reset_to_scheduler panels_closed=%s search_cleared=%s reloaded=%s",
+        panels_closed, search_cleared, reloaded,
     )
     return {"panels_closed": panels_closed, "search_cleared": search_cleared}
+
+
+async def _log_scheduler_state(app: Page, where: str) -> None:
+    """PHI-free view of why the scheduler search may be unreachable."""
+    try:
+        opener = app.get_by_title("Scheduler")
+        opener_visible = await opener.first.is_visible() if await opener.count() else False
+    except Exception:
+        opener_visible = None
+    frame_url = "-"
+    box = None
+    combos = None
+    try:
+        for f in app.frames:
+            if getattr(f, "name", None) == "frmScheduler":
+                frame_url = (f.url or "").split("?")[0][-60:]
+                combos = await f.get_by_role("combobox").count()
+                break
+        el = app.locator('iframe[name="frmScheduler"]')
+        if await el.count():
+            box = await el.first.bounding_box()
+    except Exception:
+        pass
+    size = f"{int(box['width'])}x{int(box['height'])}" if box else "none"
+    log.info(
+        "flow=reset_to_scheduler state=%s opener_visible=%s sched_frame=%s comboboxes=%s url_tail=%s",
+        where, opener_visible, size, combos, frame_url,
+    )
 
 
 async def describe_ui_state(app) -> dict:
