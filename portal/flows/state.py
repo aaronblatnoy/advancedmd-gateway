@@ -94,6 +94,15 @@ async def reset_to_scheduler(app: Page) -> dict:
     content): {"panels_closed": N, "search_cleared": bool}.
     """
     await dismiss_blocking_dialogs(app)
+    # A Details / Check Eligibility panel left open by the previous flow
+    # covers the scheduler search box. Close it before the patient panels.
+    try:
+        from .eligibility import close_eligibility_panel, ELIGIBILITY_FRAME_NAME
+        if any(getattr(f, "name", None) == ELIGIBILITY_FRAME_NAME
+               for f in (getattr(app, "frames", None) or [])):
+            await close_eligibility_panel(app)
+    except Exception:
+        pass
     panels_closed = await _close_open_patient_panels(app)
     # Re-dismiss: closing a panel can re-pop a memo modal.
     await dismiss_blocking_dialogs(app)
@@ -119,3 +128,42 @@ async def reset_to_scheduler(app: Page) -> dict:
         panels_closed, search_cleared,
     )
     return {"panels_closed": panels_closed, "search_cleared": search_cleared}
+
+
+async def describe_ui_state(app) -> dict:
+    """PHI-free snapshot for diagnosing a blocked scheduler.
+
+    Returns frame names (structural identifiers) and the accessible names of
+    visible buttons inside any visible dialog (fixed UI labels such as
+    "OK" / "Close"). Never page text.
+    """
+    out: dict = {"frames": [], "dialog_buttons": []}
+    try:
+        out["frames"] = sorted(
+            {str(getattr(f, "name", "") or "") for f in (getattr(app, "frames", None) or [])}
+            - {""}
+        )[:12]
+    except Exception:
+        pass
+    try:
+        from .login import _visible_dialog
+        for root in [app] + list(getattr(app, "frames", None) or []):
+            d = await _visible_dialog(root)
+            if d is None:
+                continue
+            btns = d.get_by_role("button")
+            n = await btns.count()
+            for i in range(min(n, 6)):
+                try:
+                    name = (await btns.nth(i).get_attribute("aria-label")) or (
+                        await btns.nth(i).inner_text(timeout=1000)
+                    )
+                except Exception:
+                    name = ""
+                name = (name or "").strip()
+                if 0 < len(name) <= 24 and name.replace(" ", "").isalpha():
+                    out["dialog_buttons"].append(name)
+            break
+    except Exception:
+        pass
+    return out

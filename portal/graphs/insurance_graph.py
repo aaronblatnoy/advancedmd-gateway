@@ -18,6 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from portal.flows._runner import Checkpoints
 from portal.flows.eligibility import (
     ELIGIBILITY_FIELDS,
+    close_eligibility_panel,
     fire_check_eligibility,
     open_eligibility_frame,
     read_eligibility_from_frame,
@@ -154,6 +155,12 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
             elig = await read_eligibility_from_frame(None)
         else:
             elig = await read_eligibility_from_frame(frame)
+        if mode == "check_eligibility":
+            # Leave the app in a state the next flow can use.
+            try:
+                await close_eligibility_panel(flow.app)
+            except Exception:
+                pass
         data = dict(state.get("data") or {})
         data.update(elig)
         return {

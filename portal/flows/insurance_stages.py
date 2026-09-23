@@ -63,6 +63,11 @@ async def stage_session_and_scheduler(state: InsuranceFlowState) -> None:
                 log.info(
                     "stage=scheduler_open attempt=%s dismiss dialogs", attempt + 1
                 )
+                try:
+                    from .state import describe_ui_state
+                    log.warning("stage=scheduler_open blocked ui=%s", await describe_ui_state(app))
+                except Exception:
+                    pass
                 if await dismiss_blocking_dialogs(app) and attempt == 2:
                     raise BlockingDialogError(
                         "a blocking dialog could not be dismissed"

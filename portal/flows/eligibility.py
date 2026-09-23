@@ -238,7 +238,13 @@ async def open_eligibility_frame(app, ins):
     return frame
 
 
-async def fire_check_eligibility(frame, *, settle_timeout_s: int = 60) -> None:
+async def fire_check_eligibility(
+    frame,
+    *,
+    settle_timeout_s: int = 60,
+    refresh_timeout_s: int = 45,
+    status_timeout_s: int = 45,
+) -> None:
     """Click the billable Check Eligibility control and wait for settle.
 
     Caller must already have opened ``frmEligibilityDetails``. This is the
@@ -254,9 +260,76 @@ async def fire_check_eligibility(frame, *, settle_timeout_s: int = 60) -> None:
             f"{_CHECK_ELIGIBILITY_SECTION} button"
         )
     await btn.first.wait_for(state="visible", timeout=15000)
+    before = await _body_fingerprint(frame)
     await btn.first.click(timeout=15000)
     log.info("flow=eligibility fired Check Eligibility (gated write)")
+    # The panel still shows the OLD on-file 271 at this instant, so a plain
+    # settle check would return immediately and the caller would read stale
+    # content. Wait for the refresh to actually start (loading indicator or
+    # the body changing), then for it to finish, then for a status to be
+    # readable. All bounded; every step logs booleans only.
+    started = await _wait_refresh_started(frame, before, timeout_s=refresh_timeout_s)
     await _wait_settled(frame, timeout_s=settle_timeout_s)
+    readable = await _wait_status_readable(frame, timeout_s=status_timeout_s)
+    log.info(
+        "flow=eligibility check refresh started=%s status_readable=%s",
+        started, readable,
+    )
+
+
+async def _body_fingerprint(frame) -> tuple[int, int]:
+    """(length, hash) of the panel body text. Never leaves this module."""
+    try:
+        txt = await frame.locator("body").inner_text(timeout=4000)
+    except Exception:
+        return (-1, 0)
+    return (len(txt), hash(txt))
+
+
+async def _wait_refresh_started(frame, before, *, timeout_s: int) -> bool:
+    """True once the panel visibly begins reloading after the click."""
+    for _ in range(max(1, timeout_s)):
+        try:
+            if await frame.locator(_LOADING).count():
+                return True
+            if await _has_no_data(frame):
+                return True
+            if await _body_fingerprint(frame) != before:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+    return False
+
+
+async def _wait_status_readable(frame, *, timeout_s: int) -> bool:
+    """True once a plan status value or the no-data banner is present."""
+    for _ in range(max(1, timeout_s)):
+        try:
+            if await _has_no_data(frame):
+                return True
+            values = await frame.evaluate(_READ_JS, _LABEL_MAP)
+            if isinstance(values, dict) and str(
+                values.get("eligibility_plan_status") or ""
+            ).strip():
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+    return False
+
+
+def classify_plan_status(value: str | None) -> str:
+    """Closed PHI-free class of a scraped status: active/inactive/blank/other."""
+    s = (value or "").strip().lower()
+    if not s:
+        return "blank"
+    if any(m in s for m in ("inactive", "terminated", "not eligible", "ineligible",
+                            "cancelled", "canceled", "not active")):
+        return "inactive"
+    if "active" in s or "eligible" in s:
+        return "active"
+    return "other"
 
 
 async def read_eligibility_from_frame(frame) -> dict:
@@ -286,6 +359,10 @@ async def read_eligibility_from_frame(frame) -> dict:
     except Exception:
         result["eligibility_service_types"] = []
 
+    log.info(
+        "flow=eligibility status_class=%s",
+        classify_plan_status(result.get("eligibility_plan_status")),
+    )
     log.info(
         "flow=eligibility field presence: %s",
         {
@@ -318,3 +395,54 @@ async def scrape_eligibility_details(app, ins, checkpoints=None) -> dict:
         frame = await open_eligibility_frame(app, ins)
 
     return await read_eligibility_from_frame(frame)
+
+
+_ELIGIBILITY_CLOSE_SELECTORS = (
+    "i.amds-click-out-x",
+    'button[aria-label="Close"]',
+    ".modal-header .close",
+    'button:has-text("Close")',
+)
+
+
+async def close_eligibility_panel(app) -> bool:
+    """Best-effort close of the Details / Check Eligibility panel.
+
+    Leaving it open blocks the next flow's scheduler search. Tries the
+    panel's own close controls (searching the app page and every frame),
+    then Escape. Returns True when frmEligibilityDetails is gone.
+    """
+    roots = [app] + [f for f in getattr(app, "frames", []) or []]
+    for _ in range(2):
+        clicked = False
+        for root in roots:
+            for sel in _ELIGIBILITY_CLOSE_SELECTORS:
+                try:
+                    loc = root.locator(sel)
+                    n = await loc.count()
+                except Exception:
+                    continue
+                for i in range(min(n, 3)):
+                    try:
+                        item = loc.nth(i)
+                        if await item.is_visible():
+                            await item.click(timeout=2500)
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+                if clicked:
+                    break
+            if clicked:
+                break
+        if not clicked:
+            try:
+                await app.keyboard.press("Escape")
+            except Exception:
+                pass
+        await asyncio.sleep(0.6)
+        if await _find_eligibility_frame(app, timeout_s=1) is None:
+            log.info("flow=eligibility panel closed clicked=%s", clicked)
+            return True
+    log.info("flow=eligibility panel still open after close attempts")
+    return False

@@ -141,4 +141,11 @@ def create_app() -> FastAPI:
 
 
 def build_app() -> FastAPI:
+    # Same redacting log policy as the XML gateway (SPEC 17.3); level from
+    # LOG_LEVEL so the flow's PHI-free INFO milestones reach the container log.
+    try:
+        from gateway import logging_filter
+        logging_filter.configure((os.environ.get("LOG_LEVEL") or "INFO").strip().upper())
+    except Exception:
+        logging.basicConfig(level=logging.INFO)
     return create_app()
