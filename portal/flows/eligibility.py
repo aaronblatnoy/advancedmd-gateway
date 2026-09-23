@@ -243,7 +243,8 @@ async def fire_check_eligibility(
     *,
     settle_timeout_s: int = 60,
     refresh_timeout_s: int = 45,
-    status_timeout_s: int = 45,
+    status_timeout_s: int = 60,
+    nodata_confirm_s: int = 20,
 ) -> None:
     """Click the billable Check Eligibility control and wait for settle.
 
@@ -275,6 +276,12 @@ async def fire_check_eligibility(
         "flow=eligibility check refresh started=%s status_readable=%s",
         started, readable,
     )
+    # While the payer request is in flight AMD clears the old response and
+    # shows the no-data banner for a few seconds. Do not accept that banner
+    # as the answer unless it holds steady with no loading indicator.
+    if readable and await _has_no_data(frame):
+        stable = await _wait_no_data_stable(frame, hold_s=nodata_confirm_s)
+        log.info("flow=eligibility check no-data banner stable=%s", stable)
 
 
 async def _body_fingerprint(frame) -> tuple[int, int]:
@@ -317,6 +324,32 @@ async def _wait_status_readable(frame, *, timeout_s: int) -> bool:
             pass
         await asyncio.sleep(1)
     return False
+
+
+async def _wait_no_data_stable(frame, *, hold_s: int) -> bool:
+    """True when the no-data banner persists ``hold_s`` seconds with no
+    loading indicator and no status value appearing. False the moment a
+    status value shows up (the real 271 arrived) or loading resumes."""
+    held = 0
+    for _ in range(max(1, hold_s) * 3):
+        try:
+            if await frame.locator(_LOADING).count():
+                held = 0
+            elif not await _has_no_data(frame):
+                return False
+            else:
+                values = await frame.evaluate(_READ_JS, _LABEL_MAP)
+                if isinstance(values, dict) and str(
+                    values.get("eligibility_plan_status") or ""
+                ).strip():
+                    return False
+                held += 1
+                if held >= hold_s:
+                    return True
+        except Exception:
+            held = 0
+        await asyncio.sleep(1)
+    return held >= hold_s
 
 
 def classify_plan_status(value: str | None) -> str:
@@ -399,10 +432,56 @@ async def scrape_eligibility_details(app, ins, checkpoints=None) -> dict:
 
 _ELIGIBILITY_CLOSE_SELECTORS = (
     "i.amds-click-out-x",
+    '[class*="click-out"]',
     'button[aria-label="Close"]',
+    '[aria-label="Close"]',
+    '[aria-label="close"]',
+    'mat-icon:has-text("close")',
     ".modal-header .close",
+    '[class*="close-button"]',
+    '[class*="closeButton"]',
     'button:has-text("Close")',
+    'button:has-text("Done")',
+    'button:has-text("Cancel")',
+    ".amds-tab-close",
+    ".tab .close",
 )
+
+_STRUCTURE_PROBE_JS = r"""
+() => {
+  const out = [];
+  const seen = new Set();
+  for (const el of document.querySelectorAll(
+      'button,[role=button],i,mat-icon,[class*=close],[class*=click-out],[aria-label]')) {
+    const tag = el.tagName.toLowerCase();
+    const cls = (el.getAttribute('class')||'').split(/\s+/).filter(c => /close|click|dismiss|x$|icon/i.test(c)).slice(0,2).join('.');
+    const aria = (el.getAttribute('aria-label')||'').trim();
+    const txt = (el.textContent||'').replace(/\s+/g,' ').trim();
+    const label = aria && aria.length <= 20 && /^[A-Za-z _-]+$/.test(aria) ? aria
+                : (tag === 'button' || tag === 'mat-icon') && txt.length <= 16 && /^[A-Za-z _-]+$/.test(txt) ? txt : '';
+    const key = tag + '.' + cls + '#' + label;
+    if (!cls && !label) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+    if (out.length >= 14) break;
+  }
+  return out;
+}
+"""
+
+
+async def _log_structure(root, where: str) -> None:
+    """PHI-free: tag, class fragments matching close/icon, fixed button labels."""
+    try:
+        items = await root.evaluate(_STRUCTURE_PROBE_JS)
+    except Exception as exc:
+        log.info("flow=eligibility structure %s probe_failed=%s", where, type(exc).__name__)
+        return
+    if not isinstance(items, list):
+        return
+    line = " ".join(str(i)[:40] for i in items)[:180]
+    log.info("flow=eligibility structure %s: %s", where, line or "-")
 
 
 async def close_eligibility_panel(app) -> bool:
@@ -445,4 +524,14 @@ async def close_eligibility_panel(app) -> bool:
             log.info("flow=eligibility panel closed clicked=%s", clicked)
             return True
     log.info("flow=eligibility panel still open after close attempts")
+    # Diagnostics so the next change targets the real control.
+    frame = await _find_eligibility_frame(app, timeout_s=1)
+    if frame is not None:
+        await _log_structure(frame, "elig-frame")
+    await _log_structure(app, "app-page")
+    try:
+        names = sorted({str(getattr(f, "name", "") or "") for f in app.frames} - {""})
+        log.info("flow=eligibility frames: %s", " ".join(names)[:180])
+    except Exception:
+        pass
     return False

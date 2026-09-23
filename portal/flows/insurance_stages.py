@@ -22,6 +22,8 @@ from ._runner import (
 from .login import dismiss_blocking_dialogs, ensure_logged_in, took_relogin
 from .state import reset_to_scheduler
 
+_PATIENT_INFO_IFRAMES_DIAG = 'iframe[name^="frmPatientInfo"], iframe[id^="frmPatientInfo"]'
+
 log = logging.getLogger("amd_portal_mcp.stages")
 
 
@@ -65,7 +67,13 @@ async def stage_session_and_scheduler(state: InsuranceFlowState) -> None:
                 )
                 try:
                     from .state import describe_ui_state
-                    log.warning("stage=scheduler_open blocked ui=%s", await describe_ui_state(app))
+                    ui = await describe_ui_state(app)
+                    log.warning("stage=scheduler_open blocked frames=%s",
+                                " ".join(ui.get("frames", []))[:160])
+                    log.warning("stage=scheduler_open blocked dialog_buttons=%s",
+                                " ".join(ui.get("dialog_buttons", []))[:160])
+                    n_pi = await app.locator(_PATIENT_INFO_IFRAMES_DIAG).count()
+                    log.warning("stage=scheduler_open blocked patient_panels=%s", n_pi)
                 except Exception:
                     pass
                 if await dismiss_blocking_dialogs(app) and attempt == 2:

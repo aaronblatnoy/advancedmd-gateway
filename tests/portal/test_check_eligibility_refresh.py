@@ -100,3 +100,39 @@ def test_close_eligibility_panel_reports_closed(monkeypatch):
     async def _none(app, timeout_s=1): return None
     monkeypatch.setattr(eligibility, "_find_eligibility_frame", _none)
     assert asyncio.run(eligibility.close_eligibility_panel(_App())) is True
+
+
+def test_transient_no_data_after_click_is_not_accepted(_fast_sleep):
+    """AMD shows the no-data banner while the payer request is in flight."""
+    class _Panel(_RefreshingPanel):
+        # old -> (banner) -> new status
+        def locator(self, sel):
+            ph = self._phase()
+            if sel == "body" and ph == "loading":
+                return _Loc(count=1, text="No Data Received From Carrier")
+            return super().locator(sel)
+    panel = _Panel(polls_until_loading=1, polls_loading=8, final_status="Active")
+    _fast_sleep.panels.append(panel)
+    asyncio.run(eligibility.fire_check_eligibility(
+        panel, settle_timeout_s=30, refresh_timeout_s=30, status_timeout_s=30, nodata_confirm_s=20))
+    out = asyncio.run(eligibility.read_eligibility_from_frame(panel))
+    assert out["eligibility_no_data"] is False
+    assert out["eligibility_plan_status"] == "Active"
+
+
+def test_persistent_no_data_is_accepted_after_hold(_fast_sleep):
+    class _Panel(_RefreshingPanel):
+        def locator(self, sel):
+            if sel == "body" and self._phase() != "old":
+                return _Loc(count=1, text="No Data Received From Carrier")
+            if sel == eligibility._LOADING:
+                return _Loc(count=0)
+            return super().locator(sel)
+        async def evaluate(self, js, arg):
+            return {"eligibility_plan_status": ""}
+    panel = _Panel(polls_until_loading=1, polls_loading=10_000)
+    _fast_sleep.panels.append(panel)
+    asyncio.run(eligibility.fire_check_eligibility(
+        panel, settle_timeout_s=5, refresh_timeout_s=5, status_timeout_s=5, nodata_confirm_s=3))
+    out = asyncio.run(eligibility.read_eligibility_from_frame(panel))
+    assert out["eligibility_no_data"] is True
