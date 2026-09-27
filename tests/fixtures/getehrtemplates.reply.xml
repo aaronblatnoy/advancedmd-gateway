@@ -1,0 +1,9 @@
+<!-- synthetic fixture - hand-written from reference client XML shapes, contains no real patient data -->
+<PPMDResults>
+  <Results success="1" templatecount="2">
+    <templatelist>
+      <template id="700001" name="TEST GENERAL NOTE"/>
+      <template id="700002" name="TEST PROCEDURE NOTE"/>
+    </templatelist>
+  </Results>
+</PPMDResults>

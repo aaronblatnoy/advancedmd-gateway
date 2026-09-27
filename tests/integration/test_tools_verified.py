@@ -56,6 +56,7 @@ ARGS: dict[str, dict[str, Any]] = {
         "description": "synthetic test document",
     },
     "amd_ehr_getehrnotes": {"patient_id": "900001"},
+    "amd_ehr_getehrtemplates": {},
     "amd_payments_get_tx_history": {"patient_id": "900001"},
     "amd_billing_get_charge_detail_data": {"charge_id": "400001"},
 }
@@ -298,6 +299,17 @@ async def test_getehrnotes_result_shape(registry, entry_queue):
 
     assert set(result) == {"patient_id", "count"}
     assert result["count"] == 2
+
+
+async def test_getehrtemplates_result_shape(registry, entry_queue):
+    result, _s, _l = await run_tool(registry, "amd_ehr_getehrtemplates", entry_queue)
+
+    assert set(result) == {"count", "templates"}
+    assert result["count"] == 2
+    assert result["templates"] == [
+        {"id": "700001", "name": "TEST GENERAL NOTE"},
+        {"id": "700002", "name": "TEST PROCEDURE NOTE"},
+    ]
 
 
 async def test_gettxhistory_result_shape(registry, entry_queue):

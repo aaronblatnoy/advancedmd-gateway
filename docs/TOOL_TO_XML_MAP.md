@@ -1210,6 +1210,20 @@ asserts each handler's `XmlRequest` against.
   the tool being verified (SPEC 9.2). All three are enforced in
   `gateway/worker.py` and tested.
 
+## verification-ledger-getehrtemplates
+
+- Tool: `amd_ehr_getehrtemplates` (alias `getehrtemplates`), ehr
+- Request: action `getehrtemplates`, class `api`, no attrs, no children.
+  Source: `domains/amd_ehr_mcp/handlers/getehrtemplates.py`; catalog
+  documents `class_: "api"`.
+- Live check: **PENDING OPERATOR**
+- Fixture: `tests/fixtures/getehrtemplates.reply.xml`
+- Result shape (Appendix B): `{count, templates:[{id, name}]}`. Template
+  ids and names are practice configuration, not PHI; every other reply
+  attribute is dropped. Added 2026-09-27 because `getehrnotes` faults
+  "Template Id is not valid" without a `templateid` on the dermacare
+  office key and nothing else can supply one.
+
 ## verification-ledger-getehrnotes
 
 - Tool: `amd_ehr_getehrnotes` (alias `getehrnotes`), ehr

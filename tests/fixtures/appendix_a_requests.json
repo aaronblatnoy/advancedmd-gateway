@@ -138,5 +138,13 @@
     ],
     "children": [],
     "reply_fixture": "lookuppatient.reply.xml"
+  },
+  "amd_ehr_getehrtemplates": {
+    "alias": "getehrtemplates",
+    "action": "getehrtemplates",
+    "class": "api",
+    "attrs": [],
+    "children": [],
+    "reply_fixture": "getehrtemplates.reply.xml"
   }
 }
