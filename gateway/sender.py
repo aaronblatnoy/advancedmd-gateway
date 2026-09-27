@@ -39,6 +39,7 @@ __all__ = [
     "AMD_CONTENT_TYPE",
     "AMD_XML_ENCODING",
     "SESSION_TIMEOUT_CODES",
+    "is_session_timeout",
     "REDIRECT_FAULT_CODE",
     "RETRY_BACKOFFS",
     "msgtime_now",
@@ -60,7 +61,20 @@ AMD_XML_ENCODING = "ISO-8859-1"
 AMD_CONTENT_TYPE = f"text/xml; charset={AMD_XML_ENCODING}"
 
 #: SPEC 8.2: expiry is signalled by these fault codes.
+# 1025 / -2147220479: "Session has timed out" (vendor doc).
 SESSION_TIMEOUT_CODES = frozenset({"1025", "-2147220479"})
+# -2147219456 is AMD's generic fault code (also "Missing apptstatus"). When
+# its description says the User Context is invalid, the long-lived session
+# has lapsed (observed live 2026-09-21 and nightly 2026-09-24..26): same
+# single re-login recovery as 1025.
+_GENERIC_FAULT_CODE = "-2147219456"
+_SESSION_LAPSED_MARKER = "user context"
+
+
+def is_session_timeout(code: str, description: str | None) -> bool:
+    if code in SESSION_TIMEOUT_CODES:
+        return True
+    return code == _GENERIC_FAULT_CODE and _SESSION_LAPSED_MARKER in (description or "").lower()
 
 #: SPEC 8.1: the login reply's "go to your regional server" fault.
 REDIRECT_FAULT_CODE = "-2147220476"
@@ -370,7 +384,7 @@ class Sender:
                 return tree
             code, description = fault
 
-            if code in SESSION_TIMEOUT_CODES:
+            if is_session_timeout(code, description):
                 # SPEC 8.4: at most ONE re-login per AMD request. The
                 # second 1025 is a session we cannot establish, not a
                 # session we can refresh.

@@ -457,3 +457,38 @@ async def test_an_unexpected_exception_becomes_internal_error_not_a_hang():
     err = req.slot.exception()
     assert isinstance(err, InternalError)
     assert "body dump" not in str(err)
+
+
+def test_user_context_invalid_fault_is_a_session_timeout():
+    """AMD returns its generic code -2147219456 with 'User Context ... invalid'
+    when a long-lived session lapses (live 2026-09-21, 2026-09-24..26). That
+    must trigger the same single re-login as 1025; the same code with an
+    ordinary description ("Missing apptstatus") must stay a plain AmdFault."""
+    from gateway.sender import is_session_timeout
+    assert is_session_timeout("1025", "Session has timed out")
+    assert is_session_timeout(
+        "-2147219456",
+        "AMD-0-09232115 | Security error: The User Context attached to your request is invalid.",
+    )
+    assert not is_session_timeout("-2147219456", "Missing apptstatus")
+    assert not is_session_timeout("-2147219456", None)
+
+
+async def test_user_context_invalid_triggers_one_relogin_and_resend():
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(200, content=fault_body(
+                "-2147219456",
+                "Security error: The User Context attached to your request is invalid.",
+            ))
+        return httpx.Response(200, content=OK_BODY)
+
+    sender = make_sender(handler)
+    req = make_request("getreminderappts")
+    await sender.serve(req)
+    assert req.slot.exception() is None
+    assert attempts["n"] == 2
+    assert sender.relogins == 1

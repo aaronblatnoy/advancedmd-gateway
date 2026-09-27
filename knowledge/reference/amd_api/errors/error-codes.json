@@ -33,6 +33,16 @@ related: [reference-amd-api-error-codes]
       "notes": "Client should re-login and retry the call once."
     },
     {
+      "code": "-2147219456",
+      "alt_code": null,
+      "name": "Security error: User Context invalid",
+      "type": "Client",
+      "category": "auth",
+      "handler": "auto-relogin",
+      "documented_by": "observed",
+      "notes": "Generic code shared with argument errors (e.g. Missing apptstatus). Only when the description says User Context invalid does it mean the long-lived session lapsed (seen 2026-09-21, 2026-09-24..26): re-login and retry once."
+    },
+    {
       "code": "1026",
       "alt_code": null,
       "name": "Invalid host IP address",
