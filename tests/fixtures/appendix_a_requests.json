@@ -144,9 +144,7 @@
     "action": "getehrtemplates",
     "class": "api",
     "attrs": [],
-    "children": [
-      "template"
-    ],
+    "children": [],
     "reply_fixture": "getehrtemplates.reply.xml"
   }
 }

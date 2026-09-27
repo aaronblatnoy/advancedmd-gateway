@@ -96,14 +96,13 @@ async def handle() -> dict[str, Any]:
     # The gateway client is async; the legacy sync safe_amd_call never
     # sends anything through it (that is why the BETA count-only EHR
     # handlers were never verifiable).
-    # AMD replies only with the columns the request names (same pattern
-    # as getdatevisits' <visit .../> children). Without this child the
-    # reply rows carry nothing but @id (live 2026-09-27).
-    from lxml import etree
-    children = [etree.Element("template", id="Id", name="Name", description="Description")]
+    # Live 2026-09-27 (dermacare): the reply rows carry ONLY @id. AMD
+    # rejects guessed column requests ("Invalid column name 'Name'"), and
+    # the column vocabulary for this action is undocumented, so no
+    # children are sent. Callers get ids; names arrive on the notes
+    # themselves (getehrnotes @templatename).
     _element, raw_dict, err = await safe_amd_call_element_async(
         client, action=ACTION, raw_to_dict_fn=raw_to_dict, class_="api",
-        children=children,
     )
     if err is not None:
         return {**err}
