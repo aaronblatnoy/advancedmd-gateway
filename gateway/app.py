@@ -226,6 +226,8 @@ def create_app(deps: Deps, *, lifecycle: Lifecycle | None = None) -> FastAPI:
                     "state": getattr(session, "state", "none"),
                     "age_s": getattr(session, "age_s", None),
                     "last_login_at": getattr(session, "last_login_at", None),
+                    "last_probe_at": getattr(session, "last_probe_at", None),
+                    "last_probe_ok": getattr(session, "last_probe_ok", None),
                 },
                 "entry_queue": {
                     "depth": deps.entry_queue.depth,

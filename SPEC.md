@@ -438,8 +438,21 @@ Peak = Monday to Friday, 06:00 to 18:00 America/Denver.
     full (a login happened < 60 s ago), the sender waits; it never
     hammers.
 
-8.6 Proactive refresh: not built. Revisit if audit shows 1025 landing on
-    interactive calls more than once a day.
+8.6 Keepalive (built 2026-09-27 after three nights of every read failing
+    on a lapsed session while /health said ok). A background loop in
+    gateway/keepalive.py: every SESSION_PROBE_INTERVAL_S it sends one
+    cheap PHI-free read (lookupzipcode, fixed ZIP) through the normal
+    sender path, so a lapsed session is repaired by the 8.3 re-login
+    before a caller sees it; when the session is older than
+    SESSION_MAX_AGE_S it forces a fresh login. The probe outcome is
+    recorded on the session (last_probe_at / last_probe_ok) and a failed
+    probe makes /health degraded. Both go through the login bucket
+    (8.5). 0 disables either half.
+
+8.8 Session-lapse detection is by fault CODE for 1025 / -2147220479 and
+    by code + description for AMD's generic -2147219456 when the text
+    names an invalid User Context (observed 2026-09-21..26); the same
+    code with any other description is an ordinary fault.
 
 8.7 /v1/login (staff credential check) uses a separate
     throwaway AmdSession object and the same login bucket. It never
@@ -985,6 +998,8 @@ connector_up{instance_id}                              gauge
 | BATCH_AGING_MS | no | 60000 | |
 | AMD_POST_TIMEOUT_S | no | 30 | |
 | LOGIN_CHECK_CACHE_S | no | 300 | |
+| SESSION_PROBE_INTERVAL_S | no | 900 | 8.6; 0 disables the probe |
+| SESSION_MAX_AGE_S | no | 21600 | 8.6; 0 disables the forced refresh |
 | ENTRY_QUEUE_CAP | no | 2000 | |
 | SHUTDOWN_DRAIN_S | no | 30 | |
 | LOG_LEVEL | no | INFO | |
@@ -1176,7 +1191,6 @@ APPROVE-WITH-CONDITIONS with conditions closed.
 - Two tools in flight with priority-ordered sending: sender loop sorts
   the request queue by priority; worker concurrency becomes 2 with one
   slot reserved for interactive. Revisit after a month of metrics.
-- Proactive session refresh (8.6).
 - Per-token office key (10.5).
 - TLS termination on the private path (17.4) if the private network
   ever stops being the only route.

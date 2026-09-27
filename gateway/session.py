@@ -161,6 +161,11 @@ class AmdSession:
         self._last_login_mono: float | None = None
         #: Login count, for /metrics. PHI-free.
         self.logins = 0
+        #: SPEC 8.6 keepalive bookkeeping. PHI-free.
+        self.last_probe_at: str | None = None
+        self.last_probe_ok: bool | None = None
+        self.probe_failures = 0
+        self.refreshes = 0
 
     # ---------------------------------------------------------- health
 
@@ -178,7 +183,18 @@ class AmdSession:
             "last_login_at": self.last_login_at,
             "age_s": self.age_s,
             "endpoint_known": self.endpoint is not None,
+            "last_probe_at": self.last_probe_at,
+            "last_probe_ok": self.last_probe_ok,
+            "probe_failures": self.probe_failures,
+            "refreshes": self.refreshes,
         }
+
+    def record_probe(self, ok: bool, *, now_iso: str) -> None:
+        """SPEC 8.6: the keepalive reports the last live probe here."""
+        self.last_probe_at = now_iso
+        self.last_probe_ok = ok
+        if not ok:
+            self.probe_failures += 1
 
     async def aclose(self) -> None:
         if self._owns_http:

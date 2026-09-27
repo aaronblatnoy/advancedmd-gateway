@@ -28,6 +28,8 @@ DEFAULTS: dict[str, str] = {
     "BATCH_AGING_MS": "60000",
     "AMD_POST_TIMEOUT_S": "30",
     "LOGIN_CHECK_CACHE_S": "300",
+    "SESSION_PROBE_INTERVAL_S": "900",
+    "SESSION_MAX_AGE_S": "21600",
     "ENTRY_QUEUE_CAP": "2000",
     "SHUTDOWN_DRAIN_S": "30",
     "LOG_LEVEL": "INFO",
@@ -74,6 +76,9 @@ class Config:
     batch_aging_ms: int = 60000
     amd_post_timeout_s: float = 30.0
     login_check_cache_s: int = 300
+    #: SPEC 8.6: keepalive. 0 disables the probe / the forced refresh.
+    session_probe_interval_s: int = 900
+    session_max_age_s: int = 21600
     entry_queue_cap: int = 2000
     shutdown_drain_s: int = 30
     log_level: str = "INFO"
@@ -105,6 +110,8 @@ class Config:
             "batch_aging_ms": self.batch_aging_ms,
             "amd_post_timeout_s": self.amd_post_timeout_s,
             "login_check_cache_s": self.login_check_cache_s,
+            "session_probe_interval_s": self.session_probe_interval_s,
+            "session_max_age_s": self.session_max_age_s,
             "entry_queue_cap": self.entry_queue_cap,
             "shutdown_drain_s": self.shutdown_drain_s,
             "log_level": self.log_level,
@@ -172,6 +179,8 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         batch_aging_ms=_as_int(env, "BATCH_AGING_MS"),
         amd_post_timeout_s=_as_float(env, "AMD_POST_TIMEOUT_S"),
         login_check_cache_s=_as_int(env, "LOGIN_CHECK_CACHE_S"),
+        session_probe_interval_s=_as_int(env, "SESSION_PROBE_INTERVAL_S"),
+        session_max_age_s=_as_int(env, "SESSION_MAX_AGE_S"),
         entry_queue_cap=_as_int(env, "ENTRY_QUEUE_CAP"),
         shutdown_drain_s=_as_int(env, "SHUTDOWN_DRAIN_S"),
         log_level=_get(env, "LOG_LEVEL").strip().upper() or "INFO",
@@ -195,6 +204,8 @@ def _validate(cfg: Config) -> None:
         ("EXECUTION_ALLOWANCE_MS", cfg.execution_allowance_ms),
         ("BATCH_AGING_MS", cfg.batch_aging_ms),
         ("LOGIN_CHECK_CACHE_S", cfg.login_check_cache_s),
+        ("SESSION_PROBE_INTERVAL_S", cfg.session_probe_interval_s),
+        ("SESSION_MAX_AGE_S", cfg.session_max_age_s),
         ("ENTRY_QUEUE_CAP", cfg.entry_queue_cap),
         ("SHUTDOWN_DRAIN_S", cfg.shutdown_drain_s),
         ("MCP_SESSION_IDLE_S", cfg.mcp_session_idle_s),

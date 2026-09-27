@@ -396,7 +396,11 @@ async def test_snapshot_carries_no_token_or_credential(config):
     session = make_session(config, handler)
     await session.login()
     snapshot = session.snapshot()
-    assert set(snapshot) == {"state", "last_login_at", "age_s", "endpoint_known"}
+    assert set(snapshot) == {
+        "state", "last_login_at", "age_s", "endpoint_known",
+        # SPEC 8.6 keepalive bookkeeping: timestamps, a bool, counters.
+        "last_probe_at", "last_probe_ok", "probe_failures", "refreshes",
+    }
     assert "synthetic-usercontext-token" not in str(snapshot)
     assert "placeholder-password" not in str(snapshot)
 

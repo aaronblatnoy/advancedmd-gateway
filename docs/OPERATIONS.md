@@ -106,6 +106,28 @@ See docs/TOKENS.md for the token and policy data model in full.
 All of the above are readable directly from `GET /metrics` (Prometheus
 text, SPEC 18.1) or, for the clock and queue state, from `GET /health`.
 
+## Session keepalive (SPEC 8.6)
+
+AMD publishes no session lifetime and, once a long-lived session lapses,
+answers every request with a fault. Until 2026-09-26 the gateway only
+noticed when a caller's request failed, and `/health` kept saying the
+session was ok; three nightly runs failed that way and the dermacare
+report returned 502s. The gateway now owns liveness itself:
+
+- every `SESSION_PROBE_INTERVAL_S` (default 900 s) it sends one cheap,
+  PHI-free read (`lookupzipcode` for a fixed ZIP) through the normal
+  sender path, so a lapsed session is repaired by the single re-login
+  before a caller sees it;
+- once the session is older than `SESSION_MAX_AGE_S` (default 6 h) it
+  forces a fresh login instead of waiting for AMD to reject one;
+- `/health` `session.last_probe_at` / `last_probe_ok` report the last
+  probe, and a failed probe makes `status` degraded.
+
+Both paths take the login bucket (one login per minute). A container
+restart is no longer the fix for a stale session; if `last_probe_ok`
+stays false, AMD itself is refusing logins (check
+`connector_session_login_refused_total`).
+
 ## Batch schedule
 
 The gateway runs no batch jobs of its own; it serializes whatever its

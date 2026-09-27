@@ -102,6 +102,8 @@ class Deps:
     #: SPEC 16.1 step 5. Long-running coroutines started at startup.
     worker_run: Coro | None = None
     sender_run: Coro | None = None
+    #: SPEC 8.6 keepalive loop (probe + max-age refresh).
+    keepalive_run: Coro | None = None
 
     #: SPEC 16.2 step 3: True while an AMD post is on the wire.
     sender_in_flight: Callable[[], bool] | None = None
@@ -285,6 +287,13 @@ def wire_real_deps(config: Config) -> Deps:
     # Register the process's sender so gateway.sender.send() -- the one
     # function handlers may call -- has a queue to put requests on.
     sender_module.install(sender, request_queue)
+    from gateway.keepalive import SessionKeepalive
+    keepalive = SessionKeepalive(
+        session=session,
+        send=sender_module.send,
+        probe_interval_s=config.session_probe_interval_s,
+        max_age_s=config.session_max_age_s,
+    )
     # Copied handlers get their AMDClient from the worker's ContextVar.
     install_client_factories()
 
@@ -377,6 +386,7 @@ def wire_real_deps(config: Config) -> Deps:
         instance_id=instance_id,
         worker_run=worker.run,
         sender_run=sender.run,
+        keepalive_run=keepalive.run,
         sender_in_flight=lambda: sender.in_flight,
         login_check=login_check,
         load_tokens=token_table.load,
@@ -428,7 +438,7 @@ class Lifecycle:
             logging.getLogger(noisy).setLevel(logging.WARNING)
         self._log_registry_counts()
         # 5. Worker loop and sender loop.
-        for run in (d.worker_run, d.sender_run):
+        for run in (d.worker_run, d.sender_run, d.keepalive_run):
             if run is not None:
                 self._tasks.append(asyncio.ensure_future(run()))
         # 6. Begin serving; /health reports "starting".
@@ -519,6 +529,10 @@ class Lifecycle:
         if self.serving_pending_verification():
             return STATUS_DEGRADED
         if getattr(self.deps.session, "state", "none") != "ok":
+            return STATUS_DEGRADED
+        # SPEC 8.6: a session that failed its last live probe is not ok,
+        # whatever the login bookkeeping says.
+        if getattr(self.deps.session, "last_probe_ok", None) is False:
             return STATUS_DEGRADED
         if self.queues_pressured():
             return STATUS_DEGRADED
