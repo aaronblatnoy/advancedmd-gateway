@@ -53,6 +53,14 @@ log = logging.getLogger("amd_portal_mcp")
 # on the current page means the session dropped back to login.
 LOGIN_MARKERS = "#frame-login"
 
+
+def _is_app_page(page) -> bool:
+    try:
+        from .browser import AMD_APP_URL_MARKER
+        return AMD_APP_URL_MARKER in (page.url or "")
+    except Exception:
+        return False
+
 # repo root = parents[2] of portal/flows/_runner.py
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DEBUG_DIR = _REPO_ROOT / "runtime" / "debug"
@@ -378,12 +386,26 @@ async def _looks_like_session_expiry(exc: BaseException, page) -> bool:
         exc, (PatientNotFoundError, AmbiguousMatchError, BlockingDialogError)
     ):
         return False
-    if type(exc).__name__ == "TimeoutError":
-        return True
+    # A login form on screen is the one certain sign.
     try:
-        return await page.locator(LOGIN_MARKERS).count() > 0
+        if await page.locator(LOGIN_MARKERS).count() > 0:
+            return True
     except Exception:
+        pass
+    if type(exc).__name__ != "TimeoutError":
         return False
+    # A stage timing out used to be read as expiry unconditionally. Live
+    # 2026-09-27: 8 of 14 failures were the Details button timing out with
+    # a perfectly live session, and each one paid for a 96 s re-login that
+    # then failed. Confirm the app chrome is actually gone first.
+    try:
+        from .browser import find_app_page
+        from .login import is_session_live
+
+        app = page if _is_app_page(page) else find_app_page(page.context)
+        return app is None or not await is_session_live(app, timeout_ms=4000)
+    except Exception:
+        return True
 
 
 def _is_llm_recoverable(

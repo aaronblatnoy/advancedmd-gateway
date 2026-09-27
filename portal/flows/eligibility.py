@@ -229,7 +229,14 @@ async def open_eligibility_frame(app, ins):
     attaches (caller treats as empty eligibility).
     """
     details_btn = ins.get_by_role("button", name="Details")
-    await details_btn.first.wait_for(state="visible", timeout=15000)
+    try:
+        await details_btn.first.wait_for(state="visible", timeout=30000)
+    except Exception:
+        # The legacy card sometimes renders the control as a link or plain
+        # text; one bounded fallback before giving up (live 2026-09-27:
+        # eligibility_details_open was the most common failed stage).
+        details_btn = ins.get_by_text("Details", exact=True)
+        await details_btn.first.wait_for(state="visible", timeout=10000)
     await details_btn.first.click(timeout=15000)
     log.info("flow=eligibility clicked Details (read-only display)")
     frame = await _find_eligibility_frame(app, timeout_s=20)
