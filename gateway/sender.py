@@ -33,7 +33,7 @@ from gateway.errors import (
     InternalError,
     SessionFailed,
 )
-from gateway.queues import RequestQueue, XmlRequest
+from gateway.queues import RequestQueue, XmlRequest, RELOGIN_ACTION
 
 __all__ = [
     "AMD_CONTENT_TYPE",
@@ -338,6 +338,9 @@ class Sender:
         escaped without filling it would hang the handler that is awaiting
         it, and through it the caller's connection.
         """
+        if req.action == RELOGIN_ACTION:
+            await self._serve_relogin(req)
+            return
         try:
             tree = await self._exchange(req)
         except ConnectorError as err:
@@ -353,6 +356,28 @@ class Sender:
         else:
             if not req.slot.done():
                 req.slot.set_result(tree)
+
+    async def _serve_relogin(self, req: XmlRequest) -> None:
+        """SPEC 8.6: a forced re-login as a queue item.
+
+        Runs on the sender loop, between exchanges, so no post is ever on
+        the wire with a token that is being replaced. The login itself takes
+        the login bucket (SPEC 8.5).
+        """
+        try:
+            await self.session.login(force=True)
+        except asyncio.CancelledError:
+            self._fail(req, AmdUnavailable())
+            raise
+        except ConnectorError as err:
+            self._fail(req, err)
+        except Exception:  # noqa: BLE001
+            log.exception("relogin control item failed")
+            self._fail(req, SessionFailed())
+        else:
+            self.relogins += 1
+            if not req.slot.done():
+                req.slot.set_result(None)
 
     async def _exchange(self, req: XmlRequest) -> Element:
         """The SPEC 6.4 body: post, parse, handle the fault, maybe relogin."""

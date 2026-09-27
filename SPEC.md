@@ -444,7 +444,12 @@ Peak = Monday to Friday, 06:00 to 18:00 America/Denver.
     cheap PHI-free read (lookupzipcode, fixed ZIP) through the normal
     sender path, so a lapsed session is repaired by the 8.3 re-login
     before a caller sees it; when the session is older than
-    SESSION_MAX_AGE_S it forces a fresh login. The probe outcome is
+    SESSION_MAX_AGE_S, or a probe fails, it enqueues a re-login control
+    item (queues.relogin_request, PRIORITY_CONTROL) at the head of the
+    request queue; the sender loop performs the forced login between
+    exchanges, so a token is never replaced under an in-flight post. No
+    component calls session.login() from outside the sender loop except
+    the startup login (16.1). The probe outcome is
     recorded on the session (last_probe_at / last_probe_ok) and a failed
     probe makes /health degraded. Both go through the login bucket
     (8.5). 0 disables either half.

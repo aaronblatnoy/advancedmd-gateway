@@ -492,3 +492,33 @@ async def test_user_context_invalid_triggers_one_relogin_and_resend():
     assert req.slot.exception() is None
     assert attempts["n"] == 2
     assert sender.relogins == 1
+
+
+# --------------------------------------------------- relogin control item
+
+
+async def test_relogin_control_item_forces_one_login_on_the_sender_loop():
+    """SPEC 8.6: the keepalive never logs in behind the loop's back; it
+    enqueues a control item and the loop performs the forced login."""
+    from gateway.queues import relogin_request
+    from tests.conftest import FakeSession
+
+    session = FakeSession()
+    sender = make_sender(lambda request: httpx.Response(200, content=OK_BODY), session=session)
+    req = relogin_request()
+    await sender.serve(req)
+    assert req.slot.exception() is None and req.slot.result() is None
+    assert session.logins == [True]
+    assert sender.relogins == 1
+
+
+async def test_relogin_control_item_refusal_fails_its_slot_only():
+    from gateway.queues import relogin_request
+    from tests.conftest import FakeSession
+
+    session = FakeSession()
+    session.fail_next = True
+    sender = make_sender(lambda request: httpx.Response(200, content=OK_BODY), session=session)
+    req = relogin_request()
+    await sender.serve(req)
+    assert isinstance(req.slot.exception(), SessionFailed)

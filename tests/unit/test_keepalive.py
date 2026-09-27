@@ -7,6 +7,7 @@ import pytest
 
 from gateway.errors import SessionFailed
 from gateway.keepalive import PROBE_ACTION, PROBE_ATTRS, SessionKeepalive
+from gateway.queues import PRIORITY_CONTROL, RELOGIN_ACTION, RequestQueue, XmlRequest
 
 
 class _Session:
@@ -53,22 +54,30 @@ def test_probe_is_a_phi_free_fixed_read_and_records_ok():
     assert s.force_logins == 0
 
 
-def test_failed_probe_is_recorded_and_forces_a_relogin():
+def test_failed_probe_is_recorded_and_enqueues_a_relogin_control_item():
+    sent = []
     async def send(req):
-        raise SessionFailed()
+        sent.append(req)
+        if req.action == PROBE_ACTION:
+            raise SessionFailed()
+        return None  # the sender loop performed the login
     s = _Session()
     asyncio.run(_ka(s, send).tick())
     assert s.last_probe_ok is False and s.probe_failures == 1
-    assert s.force_logins == 1 and s.refreshes == 1
+    assert [r.action for r in sent] == [PROBE_ACTION, RELOGIN_ACTION]
+    assert sent[1].priority == PRIORITY_CONTROL and str(sent[1].tier) == "login"
+    assert s.force_logins == 0  # never logs in behind the sender's back
+    assert s.refreshes == 1
 
 
-def test_old_session_is_refreshed_without_probing():
+def test_old_session_enqueues_a_relogin_without_probing():
     sent = []
     async def send(req):
-        sent.append(req); return object()
+        sent.append(req); return None
     s = _Session(age=30_000.0)
     asyncio.run(_ka(s, send).tick())
-    assert sent == [] and s.force_logins == 1 and s.age_s == 0.0
+    assert [r.action for r in sent] == [RELOGIN_ACTION]
+    assert s.force_logins == 0 and s.refreshes == 1
 
 
 def test_degraded_session_is_left_to_the_login_loop():
@@ -83,9 +92,21 @@ def test_degraded_session_is_left_to_the_login_loop():
 def test_refused_refresh_never_raises():
     async def send(req):
         raise SessionFailed()
-    s = _Session(); s.refuse_login = True
+    s = _Session()
     asyncio.run(_ka(s, send).tick())
-    assert s.state == "degraded" and s.refreshes == 0
+    assert s.refreshes == 0
+
+
+def test_relogin_control_item_sorts_ahead_of_every_caller_request():
+    from gateway.queues import PRIORITY_INTERACTIVE, relogin_request
+
+    async def _go():
+        q = RequestQueue()
+        q.put_nowait(XmlRequest(action="getdemographic", class_="api", record_id="r", priority=PRIORITY_INTERACTIVE))
+        q.put_nowait(relogin_request())
+        return [q.get_nowait().action, q.get_nowait().action]
+
+    assert asyncio.run(_go()) == [RELOGIN_ACTION, "getdemographic"]
 
 
 def test_disabled_when_both_settings_are_zero():

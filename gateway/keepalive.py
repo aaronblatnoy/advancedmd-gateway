@@ -9,8 +9,10 @@ session as ok. This loop makes liveness the gateway's own job:
   (``lookupzipcode`` for a fixed ZIP) through the normal sender path, so a
   lapsed session is caught and repaired by the sender's single re-login
   before any caller notices;
-- when the session is older than ``SESSION_MAX_AGE_S`` it forces a fresh
-  login instead of waiting for AMD to reject one;
+- when the session is older than ``SESSION_MAX_AGE_S`` (or a probe fails)
+  it enqueues a re-login CONTROL ITEM at the head of the sender queue; the
+  sender loop performs the login between exchanges, so the session never
+  changes underneath a post that is on the wire;
 - it records the outcome on the session so /health tells the truth.
 
 Both intervals go through the login bucket (SPEC 8.5); the loop never
@@ -24,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from gateway.errors import ConnectorError
-from gateway.queues import PRIORITY_BATCH, XmlRequest
+from gateway.queues import PRIORITY_BATCH, XmlRequest, relogin_request
 
 log = logging.getLogger("gateway.keepalive")
 
@@ -123,8 +125,11 @@ class SessionKeepalive:
         return True
 
     async def _refresh(self, reason: str) -> None:
+        """Ask the sender loop to re-login: a control item at the head of
+        its queue. The loop performs the login between exchanges, so the
+        token never changes under an in-flight post."""
         try:
-            await self.session.login(force=True)
+            await self.send(relogin_request())
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - login() already set state=degraded

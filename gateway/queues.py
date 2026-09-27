@@ -26,6 +26,11 @@ __all__ = [
 
 PRIORITY_INTERACTIVE = 0
 PRIORITY_BATCH = 1
+#: SPEC 8.6: gateway control items (a forced re-login) sort ahead of every
+#: caller request. They are served by the sender loop like any other item,
+#: so the session only ever changes between AMD exchanges, never during one.
+PRIORITY_CONTROL = -1
+RELOGIN_ACTION = "__relogin__"
 
 PRIORITY_NAMES: dict[int, str] = {
     PRIORITY_INTERACTIVE: "interactive",
@@ -316,3 +321,20 @@ class RequestQueue:
         except asyncio.QueueEmpty:
             return None
         return req
+
+
+def relogin_request() -> XmlRequest:
+    """A control item asking the sender loop to force a fresh AMD login.
+
+    Goes to the head of the request queue (PRIORITY_CONTROL) and takes the
+    login tier so the clock's one-login-per-minute bucket still applies.
+    Its slot resolves to None on success, SessionFailed on refusal.
+    """
+    return XmlRequest(
+        action=RELOGIN_ACTION,
+        class_="control",
+        record_id="relogin",
+        priority=PRIORITY_CONTROL,
+        tier="login",
+        caller="gateway-keepalive",
+    )
