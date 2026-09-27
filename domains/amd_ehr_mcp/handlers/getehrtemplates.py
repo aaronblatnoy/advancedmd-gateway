@@ -33,26 +33,62 @@ def _first(attrs: dict, keys: tuple[str, ...]) -> str:
     return ""
 
 
-def _templates(raw_dict: Any) -> list[dict[str, Any]]:
-    """One row per template: best-effort id/name plus AMD's own attributes.
+def _template_nodes(raw_dict: Any) -> list[dict]:
+    """All raw nodes whose tag is a template row, in document order."""
+    out: list[dict] = []
 
-    AMD's attribute spelling for the template name is not documented
-    (live 2026-09-27: 59 rows, ids present, none of the guessed name keys
-    matched), so the row carries ``attrs`` verbatim. Templates are
-    practice configuration; the caller-policy redactor still applies.
+    def _walk(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        if node.get("_tag") in _ROW_TAGS:
+            out.append(node)
+            return
+        for child in node.get("_children") or []:
+            _walk(child)
+
+    _walk(raw_dict)
+    return out
+
+
+def _templates(raw_dict: Any) -> list[dict[str, Any]]:
+    """One row per template: best-effort id/name plus everything AMD sent.
+
+    Live 2026-09-27 (dermacare): 59 rows whose ONLY attribute is ``id``;
+    the name is not an attribute, so the row also carries the element
+    text and each child element's tag, attributes and text. Templates
+    are practice configuration; the caller-policy redactor still applies.
     """
-    for tag in _ROW_TAGS:
-        rows = extract_rows_by_tag(raw_dict, tag)
-        if rows:
-            return [
-                {
-                    "id": _first(r, _ID_KEYS),
-                    "name": _first(r, _NAME_KEYS),
-                    "attrs": {str(k): str(v) for k, v in r.items()},
-                }
-                for r in rows
-            ]
-    return []
+    rows: list[dict[str, Any]] = []
+    for node in _template_nodes(raw_dict):
+        attrs = {str(k): str(v) for k, v in (node.get("_attrs") or {}).items()}
+        text = str(node.get("_text") or "").strip()
+        children: dict[str, Any] = {}
+        for child in node.get("_children") or []:
+            if not isinstance(child, dict):
+                continue
+            tag = str(child.get("_tag") or "")
+            if not tag:
+                continue
+            child_text = str(child.get("_text") or "").strip()
+            child_attrs = {str(k): str(v) for k, v in (child.get("_attrs") or {}).items()}
+            children[tag] = child_text if child_text and not child_attrs else (
+                {**child_attrs, **({"text": child_text} if child_text else {})}
+            )
+        name = _first(attrs, _NAME_KEYS) or text
+        if not name:
+            for key in _NAME_KEYS:
+                v = children.get(key)
+                if isinstance(v, str) and v:
+                    name = v
+                    break
+        rows.append({
+            "id": _first(attrs, _ID_KEYS),
+            "name": name,
+            "attrs": attrs,
+            "text": text,
+            "children": children,
+        })
+    return rows
 
 
 async def handle() -> dict[str, Any]:
@@ -67,6 +103,6 @@ async def handle() -> dict[str, Any]:
         return {**err}
     templates = _templates(raw_dict)
     return {
-        "count": count_rows_for_tags(raw_dict, *_ROW_TAGS),
+        "count": len(templates) or count_rows_for_tags(raw_dict, *_ROW_TAGS),
         "templates": templates,
     }
