@@ -174,7 +174,7 @@ LAUNCH_SET: Mapping[str, VerifiedTool] = {
         # Added 2026-09-27: getehrnotes needs a templateid on some office
         # keys and this is the only tool that can supply one.
         _row("amd_ehr_getehrtemplates", "getehrtemplates",
-             "ehr", 1, "getehrtemplates.reply.xml"),
+             "ehr", 3, "getehrtemplates.reply.xml"),
         _row("amd_payments_get_tx_history", "gettxhistory",
              "payments", 2, "gettxhistory.reply.xml"),
         _row("amd_billing_get_charge_detail_data", "getchargedetaildata",

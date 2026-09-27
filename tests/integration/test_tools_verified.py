@@ -306,10 +306,11 @@ async def test_getehrtemplates_result_shape(registry, entry_queue):
 
     assert set(result) == {"count", "templates"}
     assert result["count"] == 2
-    assert result["templates"] == [
-        {"id": "700001", "name": "TEST GENERAL NOTE"},
-        {"id": "700002", "name": "TEST PROCEDURE NOTE"},
+    assert [(t["id"], t["name"]) for t in result["templates"]] == [
+        ("700001", "TEST GENERAL NOTE"),
+        ("700002", "TEST PROCEDURE NOTE"),
     ]
+    assert result["templates"][0]["attrs"] == {"id": "700001", "name": "TEST GENERAL NOTE"}
 
 
 async def test_gettxhistory_result_shape(registry, entry_queue):

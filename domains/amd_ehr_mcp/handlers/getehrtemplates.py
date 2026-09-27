@@ -8,12 +8,17 @@ attribute AMD sends is dropped.
 """
 from __future__ import annotations
 from typing import Any
-from amd_mcp_common.errors import safe_amd_call
-from ._common import count_rows_for_tags, extract_rows_by_tag, get_client, raw_to_dict
+from ._common import (
+    count_rows_for_tags,
+    extract_rows_by_tag,
+    get_client,
+    raw_to_dict,
+    safe_amd_call_element_async,
+)
 
 ACTION = "getehrtemplates"
 WRITE_ACTION = False
-TIER = 1
+TIER = 3
 PERMITTED_ACTIONS = ("getehrtemplates",)
 _ROW_TAGS = ("template", "ehrtemplate")
 _ID_KEYS = ("id", "templateid", "template_id")
@@ -28,12 +33,23 @@ def _first(attrs: dict, keys: tuple[str, ...]) -> str:
     return ""
 
 
-def _templates(raw_dict: Any) -> list[dict[str, str]]:
+def _templates(raw_dict: Any) -> list[dict[str, Any]]:
+    """One row per template: best-effort id/name plus AMD's own attributes.
+
+    AMD's attribute spelling for the template name is not documented
+    (live 2026-09-27: 59 rows, ids present, none of the guessed name keys
+    matched), so the row carries ``attrs`` verbatim. Templates are
+    practice configuration; the caller-policy redactor still applies.
+    """
     for tag in _ROW_TAGS:
         rows = extract_rows_by_tag(raw_dict, tag)
         if rows:
             return [
-                {"id": _first(r, _ID_KEYS), "name": _first(r, _NAME_KEYS)}
+                {
+                    "id": _first(r, _ID_KEYS),
+                    "name": _first(r, _NAME_KEYS),
+                    "attrs": {str(k): str(v) for k, v in r.items()},
+                }
                 for r in rows
             ]
     return []
@@ -41,7 +57,12 @@ def _templates(raw_dict: Any) -> list[dict[str, str]]:
 
 async def handle() -> dict[str, Any]:
     client = get_client()
-    raw_dict, err = safe_amd_call(client, action="getehrtemplates", raw_to_dict_fn=raw_to_dict)
+    # The gateway client is async; the legacy sync safe_amd_call never
+    # sends anything through it (that is why the BETA count-only EHR
+    # handlers were never verifiable).
+    _element, raw_dict, err = await safe_amd_call_element_async(
+        client, action=ACTION, raw_to_dict_fn=raw_to_dict, class_="api",
+    )
     if err is not None:
         return {**err}
     templates = _templates(raw_dict)
