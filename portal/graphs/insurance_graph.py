@@ -11,6 +11,7 @@ See ``memory/decisions/2026-09-02-portal-flows-langgraph-deterministic-plus-llm.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -34,7 +35,7 @@ from portal.flows.insurance_stages import (
     stage_patient_info_open,
     stage_session_and_scheduler,
 )
-from portal.flows._runner import AmbiguousMatchError
+from portal.flows._runner import AmbiguousMatchError, PatientNotFoundError
 from portal.graphs.disambiguate import pick_patient_candidate
 from portal.graphs.flow_support import (
     MAX_STAGE_RETRIES,
@@ -64,6 +65,7 @@ class InsuranceGraphState(TypedDict, total=False):
     stage_retries: dict[str, int]
     aborted: bool
     disambiguation_attempts: int
+    search_fallback_used: bool
 
 
 def _stage_retries(state: InsuranceGraphState) -> dict[str, int]:
@@ -217,6 +219,8 @@ async def finalize_node(state: InsuranceGraphState) -> dict:
         data["patient_disambiguation"] = dict(flow.disambiguation)
     if flow.chosen_candidate:
         data["matched_candidate"] = flow.chosen_candidate
+    if state.get("search_fallback_used"):
+        data["search_fallback"] = "name"
     log.info(
         "insurance_graph done field presence: %s",
         {
@@ -225,6 +229,41 @@ async def finalize_node(state: InsuranceGraphState) -> dict:
         },
     )
     return {"data": data}
+
+
+_HINT_NAME_RE = re.compile(r"name\s*[:=]\s*\"?([^;\"\n]+?)\"?\s*(?:;|$)", re.I)
+
+
+def name_from_hint(hint: str) -> str:
+    """``name: Last, First`` inside a patient_hint, or ''."""
+    m = _HINT_NAME_RE.search(hint or "")
+    return m.group(1).strip() if m else ""
+
+
+async def name_search_fallback_node(state: InsuranceGraphState) -> dict:
+    """A chart-number search that found nothing retries once by name.
+
+    Live 2026-09-28: the scheduler search returns no rows for some chart
+    numbers (6 of 52 nightly flows) although the chart exists; a "Last,
+    First" search finds them. The hint keeps the chart number, so a
+    same-name duplicate is then resolved by System One to the exact row.
+    """
+    flow = state["flow"]
+    name = name_from_hint(flow.patient_hint)
+    if not name:
+        return {"aborted": True}
+    flow.checkpoints.note(
+        f"chart search found nothing; retrying by name (chart kept in hint)"
+    )
+    log.info("insurance_graph patient_found empty for chart query; retrying by name")
+    flow.patient = name
+    flow.chosen_candidate = None
+    return {
+        "failed_stage": None,
+        "last_error": None,
+        "retry_stage": "scheduler_open",
+        "search_fallback_used": True,
+    }
 
 
 async def s1_disambiguate_node(state: InsuranceGraphState) -> dict:
@@ -310,6 +349,16 @@ def _route_after_stage(state: InsuranceGraphState, on_ok: str) -> str:
         and int(state.get("disambiguation_attempts") or 0) < 1
     ):
         return "s1_disambiguate"
+    flow = state.get("flow")
+    if (
+        stage == "patient_found"
+        and isinstance(exc, PatientNotFoundError)
+        and not state.get("search_fallback_used")
+        and flow is not None
+        and flow.patient.strip().isdigit()
+        and name_from_hint(flow.patient_hint)
+    ):
+        return "name_fallback"
     retries = _stage_retries(state).get(stage, 0)
     if exc and is_recoverable_stage_error(exc, stage) and retries < MAX_STAGE_RETRIES:
         return "llm_recover"
@@ -349,6 +398,7 @@ def _build_graph():
     g.add_node("finalize", finalize_node)
     g.add_node("llm_recover", llm_recover_node)
     g.add_node("s1_disambiguate", s1_disambiguate_node)
+    g.add_node("name_fallback", name_search_fallback_node)
 
     g.add_edge(START, "scheduler_open")
 
@@ -368,8 +418,14 @@ def _build_graph():
             "patient_info_open": "patient_info_open",
             "llm_recover": "llm_recover",
             "s1_disambiguate": "s1_disambiguate",
+            "name_fallback": "name_fallback",
             "fail": END,
         },
+    )
+    g.add_conditional_edges(
+        "name_fallback",
+        lambda s: "fail" if s.get("aborted") else "scheduler_open",
+        {"scheduler_open": "scheduler_open", "fail": END},
     )
     g.add_conditional_edges(
         "s1_disambiguate",
@@ -483,6 +539,7 @@ async def _invoke(
         "stage_retries": {},
         "aborted": False,
         "disambiguation_attempts": 0,
+        "search_fallback_used": False,
     }
     return await _graph().ainvoke(initial)
 

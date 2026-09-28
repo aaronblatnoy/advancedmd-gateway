@@ -91,10 +91,12 @@ async def pick_patient_candidate(
         "`request.patient_search_string` and the extra context in "
         "`request.hint`. The practice-management search returned the rows in "
         "`search_results` (each row shows chart number, name and usually date "
-        "of birth). Which row is the patient the request refers to? Prefer "
-        "exact name matches and any date of birth, chart number, appointment "
-        "or address that agrees with the hint. If two or more rows fit the "
-        "request equally well, or none fits, answer none."
+        "of birth). Which row is the patient the request refers to? A chart "
+        "number in the hint is decisive: the row whose leading chart number "
+        "equals it is the answer even when other rows share the name and date "
+        "of birth. Otherwise prefer exact name matches and any date of birth, "
+        "appointment or address that agrees with the hint. If two or more rows "
+        "fit the request equally well, or none fits, answer none."
     )
     try:
         answer = await s1.choice(

@@ -201,3 +201,54 @@ async def test_flow_fanout_respects_cap_and_kill_switch(monkeypatch):
     monkeypatch.setenv("PORTAL_AMBIGUOUS_MAX_FANOUT", "1")
     with pytest.raises(AmbiguousMatchError):
         await insurance.get_insurance_details(object(), "x")
+
+
+@pytest.mark.asyncio
+async def test_graph_retries_by_name_when_chart_search_is_empty(monkeypatch):
+    from portal.flows._runner import PatientNotFoundError
+
+    _stub_downstream(monkeypatch)
+    searched: list[str] = []
+    resets = {"n": 0}
+
+    async def fake_scheduler(flow):
+        resets["n"] += 1
+
+    async def fake_patient_found(flow: InsuranceFlowState):
+        searched.append(flow.patient)
+        if flow.patient.isdigit():
+            raise PatientNotFoundError("no search result matched the query")
+
+    monkeypatch.setattr(ig, "stage_session_and_scheduler", fake_scheduler)
+    monkeypatch.setattr(ig, "stage_patient_found", fake_patient_found)
+
+    data = await ig.run_get_insurance_details_graph(
+        object(), "2085", checkpoints=Checkpoints(capture=False),
+        patient_hint="chart number 2085; name: Shumsky, Elena; date of birth 02/07/1980",
+    )
+    assert searched == ["2085", "Shumsky, Elena"]
+    assert resets["n"] == 2
+    assert data["search_fallback"] == "name" and data["carrier_name"] == "x"
+
+
+@pytest.mark.asyncio
+async def test_graph_no_name_fallback_without_a_name_in_hint(monkeypatch):
+    from portal.flows._runner import PatientNotFoundError
+
+    _stub_downstream(monkeypatch)
+
+    async def fake_patient_found(flow):
+        raise PatientNotFoundError("no search result matched the query")
+
+    monkeypatch.setattr(ig, "stage_patient_found", fake_patient_found)
+    with pytest.raises(PatientNotFoundError):
+        await ig.run_get_insurance_details_graph(
+            object(), "2085", checkpoints=Checkpoints(capture=False),
+            patient_hint="date of birth 02/07/1980",
+        )
+
+
+def test_name_from_hint_parsing():
+    assert ig.name_from_hint("chart number 2085; name: Shumsky, Elena; date of birth 02/07/1980") == "Shumsky, Elena"
+    assert ig.name_from_hint('name="Blatnoy, Aaron"') == "Blatnoy, Aaron"
+    assert ig.name_from_hint("date of birth 01/01/1970") == ""
