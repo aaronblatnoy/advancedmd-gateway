@@ -64,7 +64,7 @@ were present):
 | `portal_changed` | selector timeout at a post-login stage | portal markup may have changed; re-record this stage per RECORDING.md | no |
 | `portal_slow` | overall flow timeout hit | portal slow or unresponsive; retry later | yes |
 | `patient_not_found` | no search result option matched (`PatientNotFoundError`), or timeout at `patient_found` | check the search string (try "last, first" or the chart number) | no |
-| `ambiguous_match` | more than one result option matched (`AmbiguousMatchError`) | search matched more than one patient; use the chart number instead | no |
+| `ambiguous_match` | more than one result option matched (`AmbiguousMatchError`) AND System One declined AND the rows exceed `PORTAL_AMBIGUOUS_MAX_FANOUT` (default 4) or fan-out is off. Below the cap the flow checks every row and succeeds with `data.ambiguous=true` + `data.matches[]`. Error carries `candidates` (row texts) + PHI-free `system_one` verdict | search matched more than one patient and System One could not pick one confidently; pass the chart number, or add patient_hint and retry | no |
 | `blocked_by_dialog` | a blocking modal dialog (e.g. "Patient Memo") was detected but could not be dismissed (`BlockingDialogError`) | check the failing stage screenshot | yes |
 | `unknown` | anything else | inspect the failure screenshot under `runtime/debug/` and the stderr log | no |
 

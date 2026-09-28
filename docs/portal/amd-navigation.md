@@ -198,8 +198,13 @@ Inside iframe `name="frmScheduler"`.
      text matches `\b<CHART>\s*-` (starts with that chart number).
    - Else: match the query string case-insensitively.
 4. Wait for the first match (up to 15s). No match -> `PatientNotFoundError`
-   (`diagnosis=patient_not_found`). More than one match ->
-   `AmbiguousMatchError` (`diagnosis=ambiguous_match`). Click the match.
+   (`diagnosis=patient_not_found`). More than one match -> the stage raises
+   `AmbiguousMatchError(candidates=[row texts])`; the graph's
+   `s1_disambiguate` node asks System One (s1-server) which row the request
+   means using `patient_hint`; a confident pick re-runs this stage with
+   `chosen_candidate` and clicks that exact row; a declined pick makes the
+   flow check every row (cap 4). Only above the cap does the call fail
+   `ambiguous_match`. One match -> click it.
 
 ### 4.4 Open patient info  (stage: `patient_info_open`)
 1. Settle ~1s; `dismiss_blocking_dialogs` (loading a patient with a memo

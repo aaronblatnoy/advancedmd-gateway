@@ -31,6 +31,15 @@ Fetch insurance card fields + on-file 271 Details panel for one coverage.
 |---|---|---|---|
 | `patient` | string | required | Scheduler search (`last, first`) or chart number |
 | `insurance_index` | int | `1` | Coverage card (1 = primary) |
+| `patient_hint` | string | `""` | Optional context (date of birth, appointment date, address). Used only when the search returns several rows: System One (Winnow on s1-server) picks the row the request means, above a 0.70 floor |
+
+**Duplicates.** When several rows match and System One declines (no hint, or
+rows fit equally), the flow checks EVERY row (cap `PORTAL_AMBIGUOUS_MAX_FANOUT`,
+default 4; `PORTAL_AMBIGUOUS_FANOUT=0` disables) and returns
+`data = {ambiguous: true, candidates: n, system_one: {...}, matches: [{candidate,
+ok, ...fields | error}]}`. Above the cap the call fails `ambiguous_match` with
+`candidates`. A confident pick returns the normal shape plus
+`matched_candidate` and `patient_disambiguation`.
 
 **Result `data` fields (whitelist)**
 
@@ -71,6 +80,10 @@ Navigation chain: [insurance-flow.md](insurance-flow.md)
 Fire AMD **Check Eligibility** (billable 271 inquiry) then scrape the fresh
 panel. Same navigation as `get_insurance_details`, but after Details opens
 it clicks Check Eligibility inside `frmEligibilityDetails`.
+
+Accepts the same `patient_hint` and applies the same duplicate rule as
+`get_insurance_details` (each candidate row gets its own billable click, so
+the cap matters here).
 
 **Gates (all required)**
 
