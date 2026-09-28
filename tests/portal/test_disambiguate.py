@@ -149,3 +149,48 @@ async def test_graph_fails_ambiguous_when_system_one_declines(monkeypatch):
     assert calls["pf"] == 1  # asked System One once, no blind retry
     assert ei.value.candidates == CANDS
     assert ei.value.s1["reason"] == "none_chosen"
+
+
+@pytest.mark.asyncio
+async def test_flow_fans_out_over_all_candidates_when_system_one_declines(monkeypatch):
+    from portal.flows import insurance
+
+    calls: list[str | None] = []
+
+    async def fake_runner(page, patient, insurance_index=1, checkpoints=None,
+                          patient_hint="", chosen_candidate=None):
+        calls.append(chosen_candidate)
+        if chosen_candidate is None:
+            raise AmbiguousMatchError(candidates=CANDS, s1={"reason": "none_chosen"})
+        if chosen_candidate == CANDS[1]:
+            raise RuntimeError("card missing")
+        return {"carrier_name": "UHC", "matched_candidate": chosen_candidate}
+
+    monkeypatch.setattr(insurance, "run_get_insurance_details_graph", fake_runner)
+    cp = Checkpoints(capture=False)
+    out = await insurance.get_insurance_details(object(), "Shumsky, Elena", checkpoints=cp)
+    assert calls == [None, CANDS[0], CANDS[1]]
+    assert out["ambiguous"] is True and out["candidates"] == 2
+    assert out["system_one"]["reason"] == "none_chosen"
+    assert [m["ok"] for m in out["matches"]] == [True, False]
+    assert out["matches"][0]["carrier_name"] == "UHC"
+    assert out["matches"][1]["error"] == "RuntimeError"
+    assert any("candidate rows" in line for line in cp.trace_lines())
+
+
+@pytest.mark.asyncio
+async def test_flow_fanout_respects_cap_and_kill_switch(monkeypatch):
+    from portal.flows import insurance
+
+    async def fake_runner(page, patient, insurance_index=1, checkpoints=None,
+                          patient_hint="", chosen_candidate=None):
+        raise AmbiguousMatchError(candidates=CANDS)
+
+    monkeypatch.setattr(insurance, "run_get_insurance_details_graph", fake_runner)
+    monkeypatch.setenv("PORTAL_AMBIGUOUS_FANOUT", "0")
+    with pytest.raises(AmbiguousMatchError):
+        await insurance.get_insurance_details(object(), "x")
+    monkeypatch.setenv("PORTAL_AMBIGUOUS_FANOUT", "1")
+    monkeypatch.setenv("PORTAL_AMBIGUOUS_MAX_FANOUT", "1")
+    with pytest.raises(AmbiguousMatchError):
+        await insurance.get_insurance_details(object(), "x")

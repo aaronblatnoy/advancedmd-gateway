@@ -215,6 +215,8 @@ async def finalize_node(state: InsuranceGraphState) -> dict:
         data["session_reestablished"] = True
     if flow.disambiguation:
         data["patient_disambiguation"] = dict(flow.disambiguation)
+    if flow.chosen_candidate:
+        data["matched_candidate"] = flow.chosen_candidate
     log.info(
         "insurance_graph done field presence: %s",
         {
@@ -450,6 +452,7 @@ async def _invoke(
     *,
     mode: Mode = "full",
     patient_hint: str = "",
+    chosen_candidate: str | None = None,
 ) -> InsuranceGraphState:
     cp = checkpoints if checkpoints is not None else Checkpoints(capture=False)
     flow = InsuranceFlowState(
@@ -458,6 +461,7 @@ async def _invoke(
         insurance_index=insurance_index,
         checkpoints=cp,
         patient_hint=patient_hint or "",
+        chosen_candidate=chosen_candidate,
     )
     initial: InsuranceGraphState = {
         "page": page,
@@ -489,11 +493,12 @@ async def run_get_insurance_details_graph(
     insurance_index: int = 1,
     checkpoints: Checkpoints | None = None,
     patient_hint: str = "",
+    chosen_candidate: str | None = None,
 ) -> dict:
     """Run the full LangGraph (nav + scrape + on-file eligibility Details)."""
     final = await _invoke(
         page, patient, insurance_index, checkpoints, mode="full",
-        patient_hint=patient_hint,
+        patient_hint=patient_hint, chosen_candidate=chosen_candidate,
     )
     _raise_if_failed(final)
     return dict(final.get("data") or {})
@@ -505,6 +510,7 @@ async def run_check_eligibility_graph(
     insurance_index: int = 1,
     checkpoints: Checkpoints | None = None,
     patient_hint: str = "",
+    chosen_candidate: str | None = None,
 ) -> dict:
     """Nav + Details + billable Check Eligibility + scrape fresh 271."""
     final = await _invoke(
@@ -514,6 +520,7 @@ async def run_check_eligibility_graph(
         checkpoints,
         mode="check_eligibility",
         patient_hint=patient_hint,
+        chosen_candidate=chosen_candidate,
     )
     _raise_if_failed(final)
     return dict(final.get("data") or {})

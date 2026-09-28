@@ -12,10 +12,11 @@ local-LLM recovery node when a stage fails recoverably. See
 from __future__ import annotations
 
 import logging
+import os
 
 from playwright.async_api import Page
 
-from ._runner import Checkpoints, _ambiguity_details
+from ._runner import AmbiguousMatchError, Checkpoints, _ambiguity_details
 from portal.graphs.insurance_graph import (
     run_check_eligibility_graph,
     run_get_insurance_details_graph,
@@ -64,6 +65,82 @@ async def open_insurance_details(
     return flow.app, flow.ins, flow.relogin
 
 
+# Ambiguous search + System One declined -> check EVERY candidate row
+# (owner decision 2026-09-27: "when faced between multiple check both").
+# Bounded so a one-letter search cannot fan out across the whole practice.
+def _fanout_enabled() -> bool:
+    return (os.environ.get("PORTAL_AMBIGUOUS_FANOUT", "1") or "1").strip() != "0"
+
+
+def _fanout_max() -> int:
+    try:
+        return int(os.environ.get("PORTAL_AMBIGUOUS_MAX_FANOUT", "4"))
+    except ValueError:
+        return 4
+
+
+async def _run_with_fanout(
+    runner, page, patient: str, insurance_index: int, checkpoints, patient_hint: str
+) -> dict:
+    """Run one graph; on a declined ambiguity, run it once per candidate row.
+
+    Returns the single result when the search is unique or System One
+    picked a row. Otherwise returns
+    {"ambiguous": true, "candidates": n, "system_one": {...},
+     "matches": [{"candidate": row_text, "ok": bool, ...fields | error}]}.
+    """
+    extra = {"patient_hint": patient_hint} if patient_hint else {}
+    try:
+        return await runner(
+            page, patient, insurance_index, checkpoints=checkpoints, **extra
+        )
+    except AmbiguousMatchError as exc:
+        cands = list(exc.candidates)
+        if not _fanout_enabled() or len(cands) < 2 or len(cands) > _fanout_max():
+            raise
+        cp = checkpoints
+        if cp is not None:
+            cp.note(
+                f"system_one declined; checking all {len(cands)} candidate rows"
+            )
+        log.info("flow=insurance ambiguous fan-out candidates=%s", len(cands))
+        matches: list[dict] = []
+        for text in cands:
+            sub_cp = Checkpoints(capture=False)
+            item: dict
+            try:
+                data = await runner(
+                    page, patient, insurance_index, checkpoints=sub_cp,
+                    chosen_candidate=text, **extra,
+                )
+                item = {"candidate": text, "ok": True, **data}
+            except Exception as sub_exc:  # isolate; keep checking the rest
+                log.info(
+                    "flow=insurance fan-out candidate failed error=%s",
+                    type(sub_exc).__name__,
+                )
+                item = {
+                    "candidate": text,
+                    "ok": False,
+                    "error": type(sub_exc).__name__,
+                }
+            item["trace"] = sub_cp.trace_lines()
+            matches.append(item)
+        if cp is not None:
+            cp.note(
+                f"checked {len(matches)} candidate rows "
+                f"({sum(1 for m in matches if m['ok'])} ok)"
+            )
+        return {
+            "patient": patient,
+            "insurance_index": insurance_index,
+            "ambiguous": True,
+            "candidates": len(cands),
+            "system_one": dict(exc.s1),
+            "matches": matches,
+        }
+
+
 async def get_insurance_details(
     page: Page,
     patient: str,
@@ -72,10 +149,11 @@ async def get_insurance_details(
     patient_hint: str = "",
 ) -> dict:
     """patient_hint: optional caller context (DOB, appointment date, address)
-    that System One uses to pick one row when the search is ambiguous."""
-    extra = {"patient_hint": patient_hint} if patient_hint else {}
-    return await run_get_insurance_details_graph(
-        page, patient, insurance_index, checkpoints=checkpoints, **extra
+    that System One uses to pick one row when the search is ambiguous. If
+    it declines, every candidate row is checked (see _run_with_fanout)."""
+    return await _run_with_fanout(
+        run_get_insurance_details_graph, page, patient, insurance_index,
+        checkpoints, patient_hint,
     )
 
 
@@ -91,9 +169,9 @@ async def check_eligibility(
     Same whitelist as get_insurance_details. Gated at the executor /
     env layer — this body itself always performs the click when invoked.
     """
-    extra = {"patient_hint": patient_hint} if patient_hint else {}
-    return await run_check_eligibility_graph(
-        page, patient, insurance_index, checkpoints=checkpoints, **extra
+    return await _run_with_fanout(
+        run_check_eligibility_graph, page, patient, insurance_index,
+        checkpoints, patient_hint,
     )
 
 
@@ -104,7 +182,8 @@ _BATCH_OK_KEYS = set(FIELDS) | set(ELIGIBILITY_FIELDS) | set(
     CLAIMS_ADDRESS_FIELDS
 ) | {
     "patient", "insurance_index", "index", "session_reestablished", "ok",
-    "trace", "patient_disambiguation",
+    "trace", "patient_disambiguation", "matched_candidate",
+    "ambiguous", "candidates", "system_one", "matches",
 }
 _BATCH_ERR_KEYS = {
     "ok", "flow", "error", "message", "diagnosis", "next_action",

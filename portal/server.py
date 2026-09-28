@@ -45,9 +45,12 @@ async def get_insurance_details(
     2 = secondary, ...). patient_hint is optional free-text context (date
     of birth, appointment date, address) used only when the search returns
     several rows: System One (on-box Winnow via s1-server) picks the row the
-    request means, and the pick is taken only above a probability floor;
-    otherwise the call fails with diagnosis ambiguous_match and returns the
-    candidate rows so you can pass the chart number. Returns JSON {"ok": true, "data": {...}} with
+    request means, and the pick is taken only above a probability floor.
+    If it declines, EVERY candidate row (up to PORTAL_AMBIGUOUS_MAX_FANOUT,
+    default 4) is checked and the result is {"ok": true, "data":
+    {"ambiguous": true, "candidates": n, "system_one": {...}, "matches":
+    [{"candidate": row_text, "ok": bool, ...fields}]}}. Above the cap the
+    call fails ambiguous_match with the candidate rows. Returns JSON {"ok": true, "data": {...}} with
     carrier name/code, coverage type, policy/group numbers, subscriber
     name/relationship, effective/termination dates, copay, payer id, and
     eligibility status/last-checked from the insurance card; the carrier's
