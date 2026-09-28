@@ -31,6 +31,36 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
+
+def _attach_file_log() -> None:
+    """Also keep the PHI-free milestone log on disk.
+
+    Under an MCP host the server's stderr is not persisted, so a slow or
+    failed run could not be diagnosed after the fact (2026-09-28). Logs here
+    are milestones, counts and class names only, never page content.
+    """
+    import os
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+
+    target = Path(
+        os.environ.get("AMD_PORTAL_LOG_FILE", "runtime/portal-stdio.log")
+    )
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            target, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+        )
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        logging.getLogger().addHandler(handler)
+    except OSError:
+        pass
+
+
+_attach_file_log()
+
 mcp = FastMCP("amd-portal-mcp")
 
 
