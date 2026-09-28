@@ -61,9 +61,9 @@ def noul_min() -> float:
 
 def choice_min() -> float:
     try:
-        return float(os.environ.get("PORTAL_S1_RECOVERY_CHOICE_MIN", "0.50"))
+        return float(os.environ.get("PORTAL_S1_RECOVERY_CHOICE_MIN", "0.25"))
     except ValueError:
-        return 0.50
+        return 0.25
 
 
 @dataclass(slots=True)
@@ -191,7 +191,7 @@ async def choose_recovery_action(
     criteria: dict[str, str] = {}
     for a in ranked:
         where = f" in {a.frame_hint}" if a.frame_hint else ""
-        dlg = " (inside the open dialog)" if a.in_dialog else ""
+        dlg = " inside the open dialog (dismisses it)" if a.in_dialog else ""
         criteria[a.ref] = f"click the {a.role} labelled '{a.label}'{where}{dlg}"
     criteria[_ESCAPE] = "press the Escape key (closes most dialogs and dropdowns)"
     criteria[_ENTER] = "press the Enter key (accepts a focused default button)"
@@ -224,11 +224,19 @@ async def choose_recovery_action(
         "ref" if answer.choice not in (_ESCAPE, _ENTER, _NONE) else answer.choice,
         answer.probability, len(ranked), goal_stage,
     )
+    p_none = float(answer.probabilities.get(_NONE, 0.0))
     base = dict(probability=round(answer.probability, 3),
                 runner_up=None if runner_up is None else round(runner_up, 3),
-                details={"controls_offered": len(ranked)})
+                details={"controls_offered": len(ranked), "p_none": round(p_none, 3)})
+    # Policy (code, not model): stop when the model would rather stop
+    # (none chosen, or none carries at least as much mass as the pick), or
+    # when the pick is below the floor. With a dozen options the mass is
+    # spread, so the floor is 0.25 by default; a dialog with both OK and
+    # Cancel legitimately splits mass between two equally good dismissals.
     if answer.choice == _NONE:
         return RecoveryDecision("none", reason="none_chosen", **base)
+    if p_none >= answer.probability:
+        return RecoveryDecision("none", reason="none_dominates", **base)
     if answer.probability < choice_min():
         return RecoveryDecision("none", reason="below_threshold", **base)
     if answer.choice == _ESCAPE:

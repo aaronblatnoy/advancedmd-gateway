@@ -137,7 +137,9 @@ class PortalSystemOne:
         }
         reply = await self._post(body)
         answer = _first_answer(reply)
-        p = answer.get("probability", answer.get("p_yes"))
+        # s1-server answers {"type": "noul", "noul": 0.97}; the hosted API
+        # spells it "probability".
+        p = answer.get("noul", answer.get("probability", answer.get("p_yes")))
         if not isinstance(p, (int, float)):
             raise SystemOneError("noul answer missing probability")
         return float(p)

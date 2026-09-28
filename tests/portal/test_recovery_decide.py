@@ -78,6 +78,19 @@ async def test_choice_policy_none_threshold_and_keys(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_choice_stops_when_none_carries_as_much_mass_as_the_pick():
+    class _Split(_FakeS1):
+        async def choice(self, *, state, instructions, criteria):
+            probs = {k: 0.0 for k in criteria}
+            probs.update({"r1": 0.31, "none": 0.31, "r2": 0.2})
+            return ChoiceAnswer(choice="r1", probabilities=probs)
+
+    d = await decide.choose_recovery_action(actions=ACTS, s1=_Split(), **COMMON)
+    assert d.kind == "none" and d.reason == "none_dominates"
+    assert d.details["p_none"] == 0.31
+
+
+@pytest.mark.asyncio
 async def test_choice_caps_controls(monkeypatch):
     monkeypatch.setattr(decide, "MAX_CHOICE_CONTROLS", 2)
     s1 = _FakeS1(choice="r1", p=0.8)

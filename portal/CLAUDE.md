@@ -39,7 +39,7 @@ in its script, **System One on s1-server** decides, in two steps
 2. **Choice** `choose_recovery_action`: which ONE action gets back to the goal. Criteria
    are the observed refs (dialog and close controls ranked first, capped at
    `PORTAL_S1_RECOVERY_MAX_CONTROLS`=40) plus Escape, Enter and `none`. Used only above
-   `PORTAL_S1_RECOVERY_CHOICE_MIN` (0.50) and never on `none`.
+   `PORTAL_S1_RECOVERY_CHOICE_MIN` (0.25), never on `none`, and never when `none` carries at least as much mass as the pick.
 The deterministic goal probes (`recovery/stages.py`) run between steps; the step cap and
 the tried-actions history stay in code. State carries the goal, the PHI-free failure
 description, the outline and what was tried. Applies to EVERY portal tool because all of

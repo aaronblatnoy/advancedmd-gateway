@@ -15,7 +15,7 @@ decides what to do to get back on track.")
   clear?" Below 0.60 the loop aborts immediately, which also replaces the
   guess that a slow page is an expired session.
 - Choice second: one action from the observed refs (dialog and close
-  controls ranked first, cap 40) plus Escape, Enter, none. Floor 0.50.
+  controls ranked first, cap 40) plus Escape, Enter, none. Floor 0.25; none must carry less mass than the pick.
 - Both go to Winnow on s1-server because labels are PHI. Hosted Jev never
   sees the outline.
 - Deterministic goal probes still run between steps; step cap and history
