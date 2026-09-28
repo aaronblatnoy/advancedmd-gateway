@@ -252,3 +252,33 @@ def test_name_from_hint_parsing():
     assert ig.name_from_hint("chart number 2085; name: Shumsky, Elena; date of birth 02/07/1980") == "Shumsky, Elena"
     assert ig.name_from_hint('name="Blatnoy, Aaron"') == "Blatnoy, Aaron"
     assert ig.name_from_hint("date of birth 01/01/1970") == ""
+
+
+@pytest.mark.asyncio
+async def test_graph_name_fallback_runs_once_then_reports_not_found(monkeypatch):
+    """Digit search empty -> one name retry -> still empty -> PatientNotFound.
+    No third search, no model call, no fan-out."""
+    from portal.flows._runner import PatientNotFoundError
+
+    _stub_downstream(monkeypatch)
+    searched: list[str] = []
+    asked = {"s1": 0}
+
+    async def fake_patient_found(flow: InsuranceFlowState):
+        searched.append(flow.patient)
+        raise PatientNotFoundError("no search result matched the query")
+
+    async def fake_pick(**kw):
+        asked["s1"] += 1
+        return None, {}
+
+    monkeypatch.setattr(ig, "stage_patient_found", fake_patient_found)
+    monkeypatch.setattr(ig, "pick_patient_candidate", fake_pick)
+
+    with pytest.raises(PatientNotFoundError):
+        await ig.run_get_insurance_details_graph(
+            object(), "2085", checkpoints=Checkpoints(capture=False),
+            patient_hint="chart number 2085; name: Shumsky, Elena",
+        )
+    assert searched == ["2085", "Shumsky, Elena"]
+    assert asked["s1"] == 0

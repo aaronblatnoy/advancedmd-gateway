@@ -30,6 +30,7 @@ from portal.flows.claims_address import (
 )
 from portal.flows.insurance_stages import (
     InsuranceFlowState,
+    name_from_hint,
     stage_insurance_card_open,
     stage_patient_found,
     stage_patient_info_open,
@@ -231,15 +232,6 @@ async def finalize_node(state: InsuranceGraphState) -> dict:
     return {"data": data}
 
 
-_HINT_NAME_RE = re.compile(r"name\s*[:=]\s*\"?([^;\"\n]+?)\"?\s*(?:;|$)", re.I)
-
-
-def name_from_hint(hint: str) -> str:
-    """``name: Last, First`` inside a patient_hint, or ''."""
-    m = _HINT_NAME_RE.search(hint or "")
-    return m.group(1).strip() if m else ""
-
-
 async def name_search_fallback_node(state: InsuranceGraphState) -> dict:
     """A chart-number search that found nothing retries once by name.
 
@@ -306,6 +298,31 @@ async def s1_disambiguate_node(state: InsuranceGraphState) -> dict:
     }
 
 
+async def scripted_retry_node(state: InsuranceGraphState) -> dict:
+    """First response to a recoverable stage failure: no model. Dismiss any
+    blocking dialog, then re-enter through scheduler_open (which resets the
+    scheduler and reloads if needed) and replay the deterministic stages.
+    Only if the same stage fails again does control reach ``llm_recover``.
+    """
+    from portal.flows.login import dismiss_blocking_dialogs
+
+    flow = state["flow"]
+    stage = state.get("failed_stage") or "unknown"
+    try:
+        if flow.app is not None:
+            await dismiss_blocking_dialogs(flow.app)
+    except Exception:
+        pass
+    flow.checkpoints.note(f"scripted retry after {stage} failed (no model)")
+    log.info("insurance_graph scripted retry stage=%s", stage)
+    return {
+        "failed_stage": None,
+        "last_error": None,
+        "retry_stage": "scheduler_open",
+        "stage_retries": _bump_retry(state, stage),
+    }
+
+
 async def llm_recover_node(state: InsuranceGraphState) -> dict:
     from portal.graphs.recovery_graph import run_recovery
 
@@ -361,7 +378,8 @@ def _route_after_stage(state: InsuranceGraphState, on_ok: str) -> str:
         return "name_fallback"
     retries = _stage_retries(state).get(stage, 0)
     if exc and is_recoverable_stage_error(exc, stage) and retries < MAX_STAGE_RETRIES:
-        return "llm_recover"
+        # Script first, model second (owner 2026-09-28).
+        return "scripted_retry" if retries == 0 else "llm_recover"
     return "fail"
 
 
@@ -399,6 +417,7 @@ def _build_graph():
     g.add_node("llm_recover", llm_recover_node)
     g.add_node("s1_disambiguate", s1_disambiguate_node)
     g.add_node("name_fallback", name_search_fallback_node)
+    g.add_node("scripted_retry", scripted_retry_node)
 
     g.add_edge(START, "scheduler_open")
 
@@ -408,6 +427,7 @@ def _build_graph():
         {
             "patient_found": "patient_found",
             "llm_recover": "llm_recover",
+            "scripted_retry": "scripted_retry",
             "fail": END,
         },
     )
@@ -417,10 +437,16 @@ def _build_graph():
         {
             "patient_info_open": "patient_info_open",
             "llm_recover": "llm_recover",
+            "scripted_retry": "scripted_retry",
             "s1_disambiguate": "s1_disambiguate",
             "name_fallback": "name_fallback",
             "fail": END,
         },
+    )
+    g.add_conditional_edges(
+        "scripted_retry",
+        lambda s: "scheduler_open",
+        {"scheduler_open": "scheduler_open"},
     )
     g.add_conditional_edges(
         "name_fallback",
@@ -438,6 +464,7 @@ def _build_graph():
         {
             "insurance_card_open": "insurance_card_open",
             "llm_recover": "llm_recover",
+            "scripted_retry": "scripted_retry",
             "fail": END,
         },
     )
@@ -448,6 +475,7 @@ def _build_graph():
             "fields_scraped": "fields_scraped",
             "finalize": "finalize",
             "llm_recover": "llm_recover",
+            "scripted_retry": "scripted_retry",
             "fail": END,
         },
     )
@@ -457,6 +485,7 @@ def _build_graph():
         {
             "claims_address": "claims_address",
             "llm_recover": "llm_recover",
+            "scripted_retry": "scripted_retry",
             "fail": END,
         },
     )
@@ -466,6 +495,7 @@ def _build_graph():
         {
             "eligibility": "eligibility",
             "llm_recover": "llm_recover",
+            "scripted_retry": "scripted_retry",
             "fail": END,
         },
     )
@@ -475,6 +505,7 @@ def _build_graph():
         {
             "finalize": "finalize",
             "llm_recover": "llm_recover",
+            "scripted_retry": "scripted_retry",
             "fail": END,
         },
     )

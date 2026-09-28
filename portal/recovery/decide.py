@@ -47,7 +47,29 @@ __all__ = [
 # A Choice over 120 refs is noise; rank and cap. Dialog controls and close
 # affordances first (they are what usually blocks), then the rest in
 # observed order.
-MAX_CHOICE_CONTROLS = int(os.environ.get("PORTAL_S1_RECOVERY_MAX_CONTROLS", "40"))
+MAX_CHOICE_CONTROLS = int(os.environ.get("PORTAL_S1_RECOVERY_MAX_CONTROLS", "12"))
+
+# Frames a stage works in. The model is offered controls from these frames
+# (prefix match) plus anything inside an open dialog; everything else is
+# noise that spreads the Choice mass (live 2026-09-28: 33 controls offered,
+# none chosen at 0.32).
+STAGE_FRAMES: dict[str, tuple[str, ...]] = {
+    "scheduler_open": ("main", "frmScheduler"),
+    "patient_found": ("main", "frmScheduler"),
+    "patient_info_open": ("main", "frmPatientInfo"),
+    "insurance_card_open": ("frmPatientInfo",),
+    "fields_scraped": ("frmPatientInfo",),
+    "claims_address_scraped": ("frmPatientInfo",),
+    "eligibility_details_open": ("frmEligibilityDetails", "frmPatientInfo"),
+    "eligibility_check_fired": ("frmEligibilityDetails", "frmPatientInfo"),
+}
+
+
+def _in_stage_frames(a: ObservedAction, goal_stage: str) -> bool:
+    frames = STAGE_FRAMES.get(goal_stage)
+    if not frames or a.in_dialog:
+        return True
+    return any((a.frame_hint or "main").startswith(f) for f in frames)
 _ESCAPE, _ENTER, _NONE = "escape", "enter", "none"
 _CLOSE_WORDS = ("ok", "close", "cancel", "dismiss", "x", "done", "no", "later")
 
@@ -84,13 +106,14 @@ class RecoveryDecision:
     details: dict[str, Any] = field(default_factory=dict)
 
 
-def _rank(actions: list[ObservedAction]) -> list[ObservedAction]:
+def _rank(actions: list[ObservedAction], goal_stage: str = "") -> list[ObservedAction]:
     def score(a: ObservedAction) -> tuple[int, int]:
         low = a.label.strip().lower()
         closeish = 0 if (low in _CLOSE_WORDS or a.role == "icon") else 1
         return (0 if a.in_dialog else 1, closeish)
 
-    return sorted(actions, key=score)[:MAX_CHOICE_CONTROLS]
+    scoped = [a for a in actions if _in_stage_frames(a, goal_stage)] or list(actions)
+    return sorted(scoped, key=score)[:MAX_CHOICE_CONTROLS]
 
 
 def _control_rows(actions: list[ObservedAction]) -> list[dict[str, Any]]:
@@ -162,7 +185,7 @@ async def assess_stall(
         p = await s1.noul(
             state=_state(
                 goal_stage=goal_stage, goal_text=goal_text, failure=failure,
-                actions=_rank(actions), dialog_seen=dialog_seen, tried=tried,
+                actions=_rank(actions, goal_stage), dialog_seen=dialog_seen, tried=tried,
             ),
             instructions=instructions,
         )
@@ -187,7 +210,7 @@ async def choose_recovery_action(
     s1 = s1 or system_one_from_env()
     if not s1.configured:
         return RecoveryDecision("error", reason="s1_not_configured")
-    ranked = _rank(actions)
+    ranked = _rank(actions, goal_stage)
     criteria: dict[str, str] = {}
     for a in ranked:
         where = f" in {a.frame_hint}" if a.frame_hint else ""
