@@ -35,12 +35,19 @@ mcp = FastMCP("amd-portal-mcp")
 
 
 @mcp.tool()
-async def get_insurance_details(patient: str, insurance_index: int = 1) -> str:
+async def get_insurance_details(
+    patient: str, insurance_index: int = 1, patient_hint: str = ""
+) -> str:
     """Fetch a patient's insurance details from the AMD portal UI.
 
     patient is a scheduler search string ("last, first") or a chart
     number; insurance_index picks the coverage card (1 = primary,
-    2 = secondary, ...). Returns JSON {"ok": true, "data": {...}} with
+    2 = secondary, ...). patient_hint is optional free-text context (date
+    of birth, appointment date, address) used only when the search returns
+    several rows: System One (on-box Winnow via s1-server) picks the row the
+    request means, and the pick is taken only above a probability floor;
+    otherwise the call fails with diagnosis ambiguous_match and returns the
+    candidate rows so you can pass the chart number. Returns JSON {"ok": true, "data": {...}} with
     carrier name/code, coverage type, policy/group numbers, subscriber
     name/relationship, effective/termination dates, copay, payer id, and
     eligibility status/last-checked from the insurance card; the carrier's
@@ -69,6 +76,7 @@ async def get_insurance_details(patient: str, insurance_index: int = 1) -> str:
         page,
         patient=patient,
         insurance_index=insurance_index,
+        patient_hint=patient_hint,
     )
     return json.dumps(result, indent=2)
 
@@ -80,7 +88,8 @@ async def get_insurance_details_batch(
     """Fetch insurance details for many patients over ONE warm session.
 
     patients is a list of scheduler search strings / chart numbers, or
-    dicts {"patient": str, "insurance_index": int}. insurance_index is
+    dicts {"patient": str, "insurance_index": int, "patient_hint": str}.
+    insurance_index is
     the default coverage card index for plain-string items. Logs in ONCE
     and keeps the session warm across all patients (never logs out);
     normalizes state between patients; recovers from a mid-batch session
@@ -103,7 +112,10 @@ async def get_insurance_details_batch(
 
 @mcp.tool()
 async def check_eligibility(
-    patient: str, insurance_index: int = 1, confirm: bool = False
+    patient: str,
+    insurance_index: int = 1,
+    confirm: bool = False,
+    patient_hint: str = "",
 ) -> str:
     """Fire AMD portal Check Eligibility (billable) then scrape the fresh 271.
 
@@ -139,6 +151,7 @@ async def check_eligibility(
         page,
         patient=patient,
         insurance_index=insurance_index,
+        patient_hint=patient_hint,
     )
     return json.dumps(result, indent=2)
 

@@ -1,0 +1,151 @@
+"""System One patient disambiguation: node routing + policy thresholds."""
+from __future__ import annotations
+
+import pytest
+
+from portal.flows._runner import AmbiguousMatchError, Checkpoints, _ambiguity_details
+from portal.flows.insurance_stages import InsuranceFlowState
+from portal.graphs import disambiguate as dis
+from portal.graphs import insurance_graph as ig
+from portal.llm.system_one import ChoiceAnswer, PortalSystemOne, SystemOneUnavailable
+
+CANDS = ["100001 - Shumsky, Elena 01/02/1960", "100002 - Shumsky, Elena 03/04/1985"]
+
+
+class _FakeS1(PortalSystemOne):
+    def __init__(self, choice: str, p: float, *, fail: bool = False):
+        super().__init__(api_key="sk-s1-test")
+        self._choice, self._p, self._fail = choice, p, fail
+        self.calls: list[dict] = []
+
+    async def choice(self, *, state, instructions, criteria):
+        self.calls.append({"state": state, "criteria": criteria})
+        if self._fail:
+            raise SystemOneUnavailable("down")
+        other = {k: 0.0 for k in criteria}
+        other[self._choice] = self._p
+        return ChoiceAnswer(choice=self._choice, probabilities=other)
+
+
+@pytest.mark.asyncio
+async def test_pick_accepts_confident_choice_with_hint():
+    s1 = _FakeS1("c2", 0.91)
+    chosen, details = await dis.pick_patient_candidate(
+        query="Shumsky, Elena", hint="DOB 03/04/1985", candidates=CANDS, s1=s1
+    )
+    assert chosen == CANDS[1]
+    assert details["reason"] == "accepted" and details["attempted"] is True
+    crit = s1.calls[0]["criteria"]
+    assert set(crit) == {"c1", "c2", dis.NONE_KEY}
+    assert s1.calls[0]["state"]["request"]["hint"] == "DOB 03/04/1985"
+
+
+@pytest.mark.asyncio
+async def test_pick_rejects_none_and_below_threshold(monkeypatch):
+    chosen, d = await dis.pick_patient_candidate(
+        query="q", hint="", candidates=CANDS, s1=_FakeS1(dis.NONE_KEY, 0.8)
+    )
+    assert chosen is None and d["reason"] == "none_chosen"
+    monkeypatch.setenv("PORTAL_S1_DISAMBIGUATION_MIN_P", "0.9")
+    chosen, d = await dis.pick_patient_candidate(
+        query="q", hint="", candidates=CANDS, s1=_FakeS1("c1", 0.6)
+    )
+    assert chosen is None and d["reason"] == "below_threshold"
+
+
+@pytest.mark.asyncio
+async def test_pick_degrades_when_s1_unconfigured_or_down(monkeypatch):
+    monkeypatch.delenv("S1_SERVER_API_KEY", raising=False)
+    chosen, d = await dis.pick_patient_candidate(query="q", hint="", candidates=CANDS)
+    assert chosen is None and d["reason"] == "s1_not_configured"
+    chosen, d = await dis.pick_patient_candidate(
+        query="q", hint="", candidates=CANDS, s1=_FakeS1("c1", 0.9, fail=True)
+    )
+    assert chosen is None and d["reason"].startswith("s1_error:")
+
+
+def test_error_payload_carries_candidates_but_message_stays_fixed():
+    exc = AmbiguousMatchError(candidates=CANDS, s1={"reason": "none_chosen"})
+    assert str(exc) == "search matched more than one result option"
+    payload = _ambiguity_details(exc)
+    assert payload["candidates"] == CANDS
+    assert payload["system_one"]["reason"] == "none_chosen"
+
+
+async def _noop(_flow):
+    return None
+
+
+def _stub_downstream(monkeypatch):
+    async def fake_card(flow):
+        flow.app = object(); flow.ins = object()
+
+    async def fake_scrape(ins):
+        return {"carrier_name": "x"}
+
+    async def none_(*a, **k):
+        return None
+
+    async def fake_read(frame):
+        return {"eligibility_available": False}
+
+    async def fake_claims(ins):
+        return {"claims_address_available": False}
+
+    monkeypatch.setattr(ig, "stage_session_and_scheduler", _noop)
+    monkeypatch.setattr(ig, "stage_patient_info_open", _noop)
+    monkeypatch.setattr(ig, "stage_insurance_card_open", fake_card)
+    monkeypatch.setattr("portal.flows.insurance._scrape_fields", fake_scrape)
+    monkeypatch.setattr(ig, "open_eligibility_frame", none_)
+    monkeypatch.setattr(ig, "read_eligibility_from_frame", fake_read)
+    monkeypatch.setattr(ig, "scrape_claims_address", fake_claims)
+
+
+@pytest.mark.asyncio
+async def test_graph_routes_ambiguity_to_system_one_then_retries_with_pick(monkeypatch):
+    _stub_downstream(monkeypatch)
+    seen: list[str | None] = []
+
+    async def fake_patient_found(flow: InsuranceFlowState):
+        seen.append(flow.chosen_candidate)
+        if flow.chosen_candidate is None:
+            raise AmbiguousMatchError(candidates=CANDS)
+
+    async def fake_pick(*, query, hint, candidates):
+        assert hint == "DOB 03/04/1985" and candidates == CANDS
+        return CANDS[1], {"reason": "accepted", "candidates": 2, "probability": 0.9}
+
+    monkeypatch.setattr(ig, "stage_patient_found", fake_patient_found)
+    monkeypatch.setattr(ig, "pick_patient_candidate", fake_pick)
+
+    data = await ig.run_get_insurance_details_graph(
+        object(), "Shumsky, Elena", checkpoints=Checkpoints(capture=False),
+        patient_hint="DOB 03/04/1985",
+    )
+    assert seen == [None, CANDS[1]]
+    assert data["carrier_name"] == "x"
+    assert data["patient_disambiguation"]["reason"] == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_graph_fails_ambiguous_when_system_one_declines(monkeypatch):
+    _stub_downstream(monkeypatch)
+    calls = {"pf": 0}
+
+    async def fake_patient_found(flow):
+        calls["pf"] += 1
+        raise AmbiguousMatchError(candidates=CANDS)
+
+    async def fake_pick(*, query, hint, candidates):
+        return None, {"reason": "none_chosen", "candidates": 2}
+
+    monkeypatch.setattr(ig, "stage_patient_found", fake_patient_found)
+    monkeypatch.setattr(ig, "pick_patient_candidate", fake_pick)
+
+    with pytest.raises(AmbiguousMatchError) as ei:
+        await ig.run_get_insurance_details_graph(
+            object(), "Shumsky, Elena", checkpoints=Checkpoints(capture=False)
+        )
+    assert calls["pf"] == 1  # asked System One once, no blind retry
+    assert ei.value.candidates == CANDS
+    assert ei.value.s1["reason"] == "none_chosen"

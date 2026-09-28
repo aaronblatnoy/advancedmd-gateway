@@ -48,6 +48,25 @@ shared **`llm_recover`** node when a stage fails recoverably. Do not embed
 LLM calls inside stage functions. `portal/graphs/insurance_graph.py` is the
 reference; new flows copy that shape.
 
+## INV-PORTAL-SYSTEM-ONE (MUST)
+
+Bounded semantic judgments over page content (which search row is the
+patient, does the opened chart match the request) are **System One Choice /
+Noul questions**, not generation. They go through **s1-server only**
+(`S1_SERVER_URL` / `S1_SERVER_API_KEY` / `S1_MODEL`, default `winnow:e4b`
+on black-sky `:8003`) because rows and headers are PHI; the hosted Jev API
+is never called from the portal. Code owns the policy: a pick is used only
+above `PORTAL_S1_DISAMBIGUATION_MIN_P` (default 0.70) and never when the
+model answers `none`. Reference: `portal/graphs/disambiguate.py` +
+`s1_disambiguate` node in the insurance graph (2026-09-27). When the
+scheduler search returns several rows the stage raises
+`AmbiguousMatchError(candidates=[...])`; the node asks one Choice with the
+caller's `patient_hint` (DOB, appointment date, address) as state; on a
+confident pick the stage re-runs and clicks that exact row; otherwise the
+call fails `ambiguous_match` and returns `candidates` + the PHI-free
+`system_one` verdict to the authorized caller. Logs carry counts and
+probabilities only.
+
 ## How it differs from the API servers
 
 The other `amd-*-mcp` servers wrap the AMD API via `amd_client`. This
@@ -97,6 +116,8 @@ its safety properties are structural instead:
 | `portal/recovery/intermediate.py` | Legacy inline recovery helpers (tests); new flows use graph routing |
 | `portal/recovery/stages.py` | Per-checkpoint goal probes for recovery |
 | `portal/llm/ollama.py` | Local llm-server/Ollama adapter (`phi_safe=True`) |
+| `portal/llm/system_one.py` | s1-server System One client (Choice/Noul; `phi_safe=True`) |
+| `portal/graphs/disambiguate.py` | System One patient-row pick when search is ambiguous (policy thresholds in code) |
 | `portal/console.py` | Aaron-only test console (`amd-portal-console`, `127.0.0.1:8811` on black-sky) |
 | `tests/portal/` | pytest suite (FakePage, no browser/network) |
 | `docs/portal/` | TOOLS.md, TRACES.md, testing.md, navigation docs |

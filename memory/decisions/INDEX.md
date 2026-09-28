@@ -1,6 +1,7 @@
 # Decisions — advancedmd-gateway
 
 Newest first. Every non-obvious choice (naming, layering, schema, refactor
+- 2026-09-27 [portal-system-one-disambiguation](2026-09-27-portal-system-one-disambiguation.md) ambiguous patient rows resolved by a System One Choice via s1-server; patient_hint arg; candidates returned on decline
 strategy) gets a dated file here in context / decision / alternatives /
 consequences form.
 

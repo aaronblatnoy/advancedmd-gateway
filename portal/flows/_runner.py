@@ -79,7 +79,24 @@ class PatientNotFoundError(Exception):
 
 
 class AmbiguousMatchError(Exception):
-    """Patient search produced more than one matching result option."""
+    """Patient search produced more than one matching result option.
+
+    ``candidates`` carries the visible option texts (PHI: never logged; the
+    graph hands them to System One on s1-server and, if no confident pick
+    emerges, they are returned to the authorized caller so it can pass a
+    chart number or a ``patient_hint``). ``s1`` records the System One
+    outcome once a disambiguation was attempted.
+    """
+
+    def __init__(
+        self,
+        message: str = "search matched more than one result option",
+        candidates: list[str] | None = None,
+        s1: dict | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.candidates = list(candidates or [])
+        self.s1 = dict(s1 or {})
 
 
 class BlockingDialogError(Exception):
@@ -111,8 +128,9 @@ DIAGNOSES = {
         "retryable": False,
     },
     "ambiguous_match": {
-        "next_action": "search matched more than one patient; use the "
-        "chart number instead",
+        "next_action": "search matched more than one patient and System One "
+        "could not pick one confidently; pass the chart number, or add "
+        "patient_hint (date of birth, appointment date, address) and retry",
         "retryable": False,
     },
     "blocked_by_dialog": {
@@ -355,12 +373,27 @@ async def _error(
             "checkpoints": cp.as_dict(),
             "run_id": cp.run_id,
             "debug_screenshot": debug_screenshot,
+            **_ambiguity_details(exc),
         },
         name,
         cp,
         ok=False,
         diagnosis=diagnosis,
     )
+
+
+def _ambiguity_details(exc: BaseException) -> dict:
+    """Candidate rows + System One verdict for an ambiguous match.
+
+    Returned to the caller only (the authorized MCP client); the log line
+    for the failure stays PHI-free (class name + fixed message).
+    """
+    if not isinstance(exc, AmbiguousMatchError):
+        return {}
+    out: dict = {"candidates": list(exc.candidates)}
+    if exc.s1:
+        out["system_one"] = dict(exc.s1)
+    return out
 
 
 async def _save_debug(name: str, page) -> str | None:

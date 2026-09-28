@@ -34,6 +34,8 @@ from portal.flows.insurance_stages import (
     stage_patient_info_open,
     stage_session_and_scheduler,
 )
+from portal.flows._runner import AmbiguousMatchError
+from portal.graphs.disambiguate import pick_patient_candidate
 from portal.graphs.flow_support import (
     MAX_STAGE_RETRIES,
     is_recoverable_stage_error,
@@ -61,6 +63,7 @@ class InsuranceGraphState(TypedDict, total=False):
     recovery_steps: int
     stage_retries: dict[str, int]
     aborted: bool
+    disambiguation_attempts: int
 
 
 def _stage_retries(state: InsuranceGraphState) -> dict[str, int]:
@@ -210,6 +213,8 @@ async def finalize_node(state: InsuranceGraphState) -> dict:
     data["insurance_index"] = flow.insurance_index
     if flow.relogin:
         data["session_reestablished"] = True
+    if flow.disambiguation:
+        data["patient_disambiguation"] = dict(flow.disambiguation)
     log.info(
         "insurance_graph done field presence: %s",
         {
@@ -218,6 +223,43 @@ async def finalize_node(state: InsuranceGraphState) -> dict:
         },
     )
     return {"data": data}
+
+
+async def s1_disambiguate_node(state: InsuranceGraphState) -> dict:
+    """System One picks the candidate row when patient search is ambiguous.
+
+    Deterministic stage raised AmbiguousMatchError(candidates=[...]). Ask
+    Winnow (s1-server, PHI-safe) which row the request means; on a confident
+    pick set flow.chosen_candidate and re-run patient_found, which clicks
+    that exact row. Otherwise keep the ambiguity (with the System One
+    verdict attached) and end.
+    """
+    flow = state["flow"]
+    exc = state.get("last_error")
+    attempts = int(state.get("disambiguation_attempts") or 0) + 1
+    candidates = list(getattr(exc, "candidates", []) or [])
+    chosen, details = await pick_patient_candidate(
+        query=flow.patient, hint=flow.patient_hint, candidates=candidates
+    )
+    flow.disambiguation = details
+    flow.checkpoints.note(
+        f"system_one patient_disambiguation candidates={details.get('candidates')} "
+        f"reason={details.get('reason')} p={details.get('probability', '-')}"
+    )
+    if chosen is None:
+        if isinstance(exc, AmbiguousMatchError):
+            exc.s1 = details
+        return {
+            "aborted": True,
+            "disambiguation_attempts": attempts,
+        }
+    flow.chosen_candidate = chosen
+    return {
+        "failed_stage": None,
+        "last_error": None,
+        "retry_stage": "patient_found",
+        "disambiguation_attempts": attempts,
+    }
 
 
 async def llm_recover_node(state: InsuranceGraphState) -> dict:
@@ -251,6 +293,13 @@ def _route_after_stage(state: InsuranceGraphState, on_ok: str) -> str:
     if not stage:
         return on_ok
     exc = state.get("last_error")
+    if (
+        stage == "patient_found"
+        and isinstance(exc, AmbiguousMatchError)
+        and exc.candidates
+        and int(state.get("disambiguation_attempts") or 0) < 1
+    ):
+        return "s1_disambiguate"
     retries = _stage_retries(state).get(stage, 0)
     if exc and is_recoverable_stage_error(exc, stage) and retries < MAX_STAGE_RETRIES:
         return "llm_recover"
@@ -289,6 +338,7 @@ def _build_graph():
     g.add_node("eligibility", eligibility_node)
     g.add_node("finalize", finalize_node)
     g.add_node("llm_recover", llm_recover_node)
+    g.add_node("s1_disambiguate", s1_disambiguate_node)
 
     g.add_edge(START, "scheduler_open")
 
@@ -307,8 +357,14 @@ def _build_graph():
         {
             "patient_info_open": "patient_info_open",
             "llm_recover": "llm_recover",
+            "s1_disambiguate": "s1_disambiguate",
             "fail": END,
         },
+    )
+    g.add_conditional_edges(
+        "s1_disambiguate",
+        lambda s: "fail" if s.get("aborted") else "patient_found",
+        {"patient_found": "patient_found", "fail": END},
     )
     g.add_conditional_edges(
         "patient_info_open",
@@ -393,6 +449,7 @@ async def _invoke(
     checkpoints: Checkpoints | None = None,
     *,
     mode: Mode = "full",
+    patient_hint: str = "",
 ) -> InsuranceGraphState:
     cp = checkpoints if checkpoints is not None else Checkpoints(capture=False)
     flow = InsuranceFlowState(
@@ -400,6 +457,7 @@ async def _invoke(
         patient=patient,
         insurance_index=insurance_index,
         checkpoints=cp,
+        patient_hint=patient_hint or "",
     )
     initial: InsuranceGraphState = {
         "page": page,
@@ -412,6 +470,7 @@ async def _invoke(
         "recovery_steps": 0,
         "stage_retries": {},
         "aborted": False,
+        "disambiguation_attempts": 0,
     }
     return await _graph().ainvoke(initial)
 
@@ -429,10 +488,12 @@ async def run_get_insurance_details_graph(
     patient: str,
     insurance_index: int = 1,
     checkpoints: Checkpoints | None = None,
+    patient_hint: str = "",
 ) -> dict:
     """Run the full LangGraph (nav + scrape + on-file eligibility Details)."""
     final = await _invoke(
-        page, patient, insurance_index, checkpoints, mode="full"
+        page, patient, insurance_index, checkpoints, mode="full",
+        patient_hint=patient_hint,
     )
     _raise_if_failed(final)
     return dict(final.get("data") or {})
@@ -443,6 +504,7 @@ async def run_check_eligibility_graph(
     patient: str,
     insurance_index: int = 1,
     checkpoints: Checkpoints | None = None,
+    patient_hint: str = "",
 ) -> dict:
     """Nav + Details + billable Check Eligibility + scrape fresh 271."""
     final = await _invoke(
@@ -451,6 +513,7 @@ async def run_check_eligibility_graph(
         insurance_index,
         checkpoints,
         mode="check_eligibility",
+        patient_hint=patient_hint,
     )
     _raise_if_failed(final)
     return dict(final.get("data") or {})
@@ -461,10 +524,12 @@ async def run_insurance_navigation_graph(
     patient: str,
     insurance_index: int = 1,
     checkpoints: Checkpoints | None = None,
+    patient_hint: str = "",
 ) -> InsuranceFlowState:
     """Navigation-only subgraph (through ``insurance_card_open``)."""
     final = await _invoke(
-        page, patient, insurance_index, checkpoints, mode="navigation_only"
+        page, patient, insurance_index, checkpoints, mode="navigation_only",
+        patient_hint=patient_hint,
     )
     _raise_if_failed(final)
     return final["flow"]

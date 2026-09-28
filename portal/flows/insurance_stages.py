@@ -40,6 +40,15 @@ class InsuranceFlowState:
     ins: Any = None
     relogin: bool = False
     data: dict = field(default_factory=dict)
+    # Optional caller context for System One disambiguation (DOB, appointment
+    # date, address...). Free text; PHI; never logged.
+    patient_hint: str = ""
+    # Set by the graph's s1_disambiguate node: the exact option text to click
+    # when the search returns several rows.
+    chosen_candidate: str | None = None
+    # Outcome of the System One pick (candidate count, probability), merged
+    # into the result data as ``patient_disambiguation``.
+    disambiguation: dict = field(default_factory=dict)
 
 
 async def stage_session_and_scheduler(state: InsuranceFlowState) -> None:
@@ -115,10 +124,20 @@ async def stage_patient_found(state: InsuranceFlowState) -> None:
                     "no search result matched the query"
                 ) from None
             raise
-        if await result.count() > 1:
-            raise AmbiguousMatchError(
-                "search matched more than one result option"
-            )
+        n = await result.count()
+        if n > 1:
+            texts = [t.strip() for t in await result.all_inner_texts()]
+            chosen = state.chosen_candidate
+            if chosen and chosen in texts:
+                idx = texts.index(chosen)
+                await result.nth(idx).click()
+                log.info(
+                    "flow=insurance patient selected via system_one "
+                    "candidates=%s pick=%s", n, idx
+                )
+                return
+            log.info("flow=insurance patient search ambiguous candidates=%s", n)
+            raise AmbiguousMatchError(candidates=texts)
         await result.first.click()
         log.info("flow=insurance patient selected")
 

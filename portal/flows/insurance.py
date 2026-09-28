@@ -15,7 +15,7 @@ import logging
 
 from playwright.async_api import Page
 
-from ._runner import Checkpoints
+from ._runner import Checkpoints, _ambiguity_details
 from portal.graphs.insurance_graph import (
     run_check_eligibility_graph,
     run_get_insurance_details_graph,
@@ -65,23 +65,35 @@ async def open_insurance_details(
 
 
 async def get_insurance_details(
-    page: Page, patient: str, insurance_index: int = 1, checkpoints=None
+    page: Page,
+    patient: str,
+    insurance_index: int = 1,
+    checkpoints=None,
+    patient_hint: str = "",
 ) -> dict:
+    """patient_hint: optional caller context (DOB, appointment date, address)
+    that System One uses to pick one row when the search is ambiguous."""
+    extra = {"patient_hint": patient_hint} if patient_hint else {}
     return await run_get_insurance_details_graph(
-        page, patient, insurance_index, checkpoints=checkpoints
+        page, patient, insurance_index, checkpoints=checkpoints, **extra
     )
 
 
 async def check_eligibility(
-    page: Page, patient: str, insurance_index: int = 1, checkpoints=None
+    page: Page,
+    patient: str,
+    insurance_index: int = 1,
+    checkpoints=None,
+    patient_hint: str = "",
 ) -> dict:
     """Fire AMD Check Eligibility (billable) then scrape the fresh 271.
 
     Same whitelist as get_insurance_details. Gated at the executor /
     env layer — this body itself always performs the click when invoked.
     """
+    extra = {"patient_hint": patient_hint} if patient_hint else {}
     return await run_check_eligibility_graph(
-        page, patient, insurance_index, checkpoints=checkpoints
+        page, patient, insurance_index, checkpoints=checkpoints, **extra
     )
 
 
@@ -92,16 +104,20 @@ _BATCH_OK_KEYS = set(FIELDS) | set(ELIGIBILITY_FIELDS) | set(
     CLAIMS_ADDRESS_FIELDS
 ) | {
     "patient", "insurance_index", "index", "session_reestablished", "ok",
-    "trace",
+    "trace", "patient_disambiguation",
 }
 _BATCH_ERR_KEYS = {
     "ok", "flow", "error", "message", "diagnosis", "next_action",
     "retryable", "run_id", "index", "session_reestablished", "trace",
+    "candidates", "system_one",
 }
 
 
-def _normalize_patient_item(item, default_index: int) -> tuple[str, int]:
-    """Accept "last, first" / chart number, or {patient, insurance_index}."""
+def _normalize_patient_item(
+    item, default_index: int
+) -> tuple[str, int, str]:
+    """Accept "last, first" / chart number, or
+    {patient, insurance_index, patient_hint}."""
     if isinstance(item, dict):
         patient = str(item.get("patient", "")).strip()
         idx = item.get("insurance_index", default_index)
@@ -109,8 +125,9 @@ def _normalize_patient_item(item, default_index: int) -> tuple[str, int]:
             idx = int(idx)
         except (TypeError, ValueError):
             idx = default_index
-        return patient, idx
-    return str(item).strip(), default_index
+        hint = str(item.get("patient_hint", "") or "").strip()
+        return patient, idx, hint
+    return str(item).strip(), default_index, ""
 
 
 def _whitelist_item(result: dict, allowed: set) -> dict:
@@ -151,11 +168,12 @@ async def get_insurance_details_batch(
     ok_count = 0
 
     for i, raw in enumerate(patients):
-        patient, idx = _normalize_patient_item(raw, insurance_index)
+        patient, idx, hint = _normalize_patient_item(raw, insurance_index)
         item_cp = Checkpoints(capture=False)
         try:
+            extra = {"patient_hint": hint} if hint else {}
             details = await get_insurance_details(
-                page, patient, idx, checkpoints=item_cp
+                page, patient, idx, checkpoints=item_cp, **extra
             )
             item = _whitelist_item(details, _BATCH_OK_KEYS)
             item["ok"] = True
@@ -179,6 +197,7 @@ async def get_insurance_details_batch(
                 "index": i,
                 "error": type(exc).__name__,
                 "message": type(exc).__name__,
+                **_ambiguity_details(exc),
                 "trace": [
                     _trace_mod.format_started("get_insurance_details"),
                     *item_cp.trace_lines(),

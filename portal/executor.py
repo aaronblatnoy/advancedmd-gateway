@@ -78,6 +78,7 @@ async def execute_portal_tool(tool: str, args: dict[str, Any]) -> dict[str, Any]
             page,
             patient=str(args.get("patient", "")),
             insurance_index=int(args.get("insurance_index", 1)),
+            patient_hint=str(args.get("patient_hint", "") or ""),
         )
     elif canonical == "get_insurance_details_batch":
         result = await run_flow(
@@ -94,6 +95,7 @@ async def execute_portal_tool(tool: str, args: dict[str, Any]) -> dict[str, Any]
             page,
             patient=str(args.get("patient", "")),
             insurance_index=int(args.get("insurance_index", 1)),
+            patient_hint=str(args.get("patient_hint", "") or ""),
         )
     elif canonical == "portal_login":
         result = await run_flow(canonical, session_flows.portal_login, page)
