@@ -256,10 +256,13 @@ async def s1_disambiguate_node(state: InsuranceGraphState) -> dict:
             "disambiguation_attempts": attempts,
         }
     flow.chosen_candidate = chosen
+    # Re-enter via scheduler_open: the ambiguous dropdown leaves the search
+    # combobox in a state a bare retry cannot type into (live 2026-09-28:
+    # 60 s locator timeout). reset_to_scheduler clears it first.
     return {
         "failed_stage": None,
         "last_error": None,
-        "retry_stage": "patient_found",
+        "retry_stage": "scheduler_open",
         "disambiguation_attempts": attempts,
     }
 
@@ -365,8 +368,8 @@ def _build_graph():
     )
     g.add_conditional_edges(
         "s1_disambiguate",
-        lambda s: "fail" if s.get("aborted") else "patient_found",
-        {"patient_found": "patient_found", "fail": END},
+        lambda s: "fail" if s.get("aborted") else "scheduler_open",
+        {"scheduler_open": "scheduler_open", "fail": END},
     )
     g.add_conditional_edges(
         "patient_info_open",

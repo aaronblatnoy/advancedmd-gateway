@@ -105,6 +105,12 @@ def _stub_downstream(monkeypatch):
 async def test_graph_routes_ambiguity_to_system_one_then_retries_with_pick(monkeypatch):
     _stub_downstream(monkeypatch)
     seen: list[str | None] = []
+    resets = {"n": 0}
+
+    async def fake_scheduler(flow):
+        resets["n"] += 1
+
+    monkeypatch.setattr(ig, "stage_session_and_scheduler", fake_scheduler)
 
     async def fake_patient_found(flow: InsuranceFlowState):
         seen.append(flow.chosen_candidate)
@@ -123,6 +129,7 @@ async def test_graph_routes_ambiguity_to_system_one_then_retries_with_pick(monke
         patient_hint="DOB 03/04/1985",
     )
     assert seen == [None, CANDS[1]]
+    assert resets["n"] == 2  # re-entered through the scheduler reset
     assert data["carrier_name"] == "x"
     assert data["patient_disambiguation"]["reason"] == "accepted"
 
