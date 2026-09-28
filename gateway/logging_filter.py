@@ -163,10 +163,18 @@ class RedactingFilter(logging.Filter):
         if len(rendered) > MAX_VALUE_CHARS:
             record.msg = REDACTION
             record.args = ()
-        elif rendered != record.msg:
+        elif rendered != record.msg and record.name not in _ARGS_FORMATTED_LOGGERS:
             record.msg = rendered
             record.args = ()
         return True
+
+
+#: Loggers whose Formatter reads ``record.args`` positionally (uvicorn's
+#: AccessFormatter takes client, method, path, version, status from them).
+#: Collapsing their args to () made every request log a "--- Logging
+#: error ---" traceback (2026-09-28: 199 in fifteen minutes). Their args
+#: are still redacted value-by-value above; only the collapse is skipped.
+_ARGS_FORMATTED_LOGGERS = frozenset({"uvicorn.access"})
 
 
 #: Loggers that configure their own handlers with propagate=False, so the

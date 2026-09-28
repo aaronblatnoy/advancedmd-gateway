@@ -247,3 +247,19 @@ def test_exc_info_is_cleared_off_the_record():
     assert record.exc_info is None
     assert record.exc_text is None
     assert IDENTITY_SHAPED not in record.getMessage()
+
+
+def test_uvicorn_access_record_keeps_positional_args():
+    """uvicorn's AccessFormatter reads record.args; the filter must not collapse them."""
+    import logging
+
+    from gateway.logging_filter import RedactingFilter
+
+    rec = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("10.0.1.23:57456", "POST", "/v1/tools", "1.1", 200), None,
+    )
+    assert RedactingFilter().filter(rec) is True
+    assert rec.args == ("10.0.1.23:57456", "POST", "/v1/tools", "1.1", 200)
+    assert rec.getMessage() == '10.0.1.23:57456 - "POST /v1/tools HTTP/1.1" 200'
