@@ -128,7 +128,7 @@ async def _first_present_selector(ins, selectors: tuple[str, ...]) -> str | None
 
 
 async def _wait_for_any_address_selector(
-    ins, *, attempts: int = 6, interval_s: float = 0.5
+    ins, *, attempts: int = 2, interval_s: float = 0.25
 ) -> bool:
     """Boundedly wait for any claims-specific address node to attach."""
     candidates = tuple(

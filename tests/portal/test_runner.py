@@ -596,7 +596,7 @@ async def test_run_flow_serializes_on_one_browser():
     async def slow_flow(page):
         active["n"] += 1
         active["max"] = max(active["max"], active["n"])
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
         active["n"] -= 1
         return {"ok_field": True}
 

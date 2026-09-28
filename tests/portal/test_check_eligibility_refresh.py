@@ -79,7 +79,9 @@ def test_fire_is_bounded_when_refresh_never_starts(_fast_sleep):
     panel = _RefreshingPanel(polls_until_loading=10_000, polls_loading=1)
     _fast_sleep.panels.append(panel)
     asyncio.run(eligibility.fire_check_eligibility(panel, settle_timeout_s=2, refresh_timeout_s=3, status_timeout_s=2))
-    assert panel.t < 20
+    # Bounded by the configured seconds (expressed in poll ticks), plus slack
+    # for the settle re-read and the hold check.
+    assert panel.t <= eligibility._ticks(2 + 3 + 2) + eligibility._ticks(1)
 
 
 @pytest.mark.parametrize("value,expected", [

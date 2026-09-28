@@ -105,7 +105,7 @@ async def stage_patient_found(state: InsuranceFlowState) -> None:
             await search.fill("")
         except Exception:
             pass
-        await search.press_sequentially(patient, delay=50)
+        await search.press_sequentially(patient, delay=10)
         log.info("flow=insurance patient search submitted")
         options = sched.get_by_role("option")
         if patient.strip().isdigit():
@@ -148,24 +148,32 @@ async def stage_patient_info_open(state: InsuranceFlowState) -> None:
     cp = state.checkpoints
 
     async with cp.stage("patient_info_open", app):
-        await asyncio.sleep(1)
+        # No fixed sleeps: the only limit is AMD's web app, so wait on the
+        # elements themselves. The Patient Memo modal, when it appears, is
+        # caught by dismiss_blocking_dialogs (which polls) before each click.
         if await dismiss_blocking_dialogs(app):
             raise BlockingDialogError(
                 "a blocking dialog could not be dismissed"
             )
-        await sched.locator(".amds-pencil").click()
+        pencil = sched.locator(".amds-pencil")
+        await pencil.wait_for(state="visible", timeout=15000)
+        await pencil.click()
         log.info("flow=insurance opened patient info")
         pinfo_el = app.locator(
             'iframe[name^="frmPatientInfo"], iframe[id^="frmPatientInfo"]'
         ).last
+        await pinfo_el.wait_for(state="attached", timeout=20000)
         state.pinfo = pinfo_el.content_frame
-        await asyncio.sleep(2)
+        nav = state.pinfo.locator("#cdk-drop-list-0").get_by_text("Insurance")
+        await nav.wait_for(state="visible", timeout=20000)
         await dismiss_blocking_dialogs(app)
-        await state.pinfo.locator("#cdk-drop-list-0").get_by_text(
-            "Insurance"
-        ).click(timeout=20000)
+        await nav.click(timeout=20000)
         log.info("flow=insurance opened insurance list")
-        await asyncio.sleep(3)
+        # The accordion renders when the list has loaded; the card stage
+        # then waits on the specific card.
+        await state.pinfo.locator("cdk-accordion-item").first.wait_for(
+            state="attached", timeout=20000
+        )
 
 
 async def stage_insurance_card_open(state: InsuranceFlowState) -> None:
@@ -182,7 +190,11 @@ async def stage_insurance_card_open(state: InsuranceFlowState) -> None:
         await card.wait_for(timeout=60000)
         if await card.get_attribute("aria-expanded") == "false":
             await card.click()
-            await asyncio.sleep(2)
+            # The legacy iframe attaches once the card expands; the body
+            # wait below is the real gate, no clock needed.
+            await card.locator("iframe.legacy-iframe").wait_for(
+                state="attached", timeout=60000
+            )
         state.ins = card.locator("iframe.legacy-iframe").content_frame
         await state.ins.locator("body").wait_for(state="attached", timeout=60000)
         log.info(

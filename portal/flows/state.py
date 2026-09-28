@@ -68,11 +68,16 @@ async def _close_open_patient_panels(app: Page, max_panels: int = 4) -> int:
                     break
             except Exception:
                 continue
-        await asyncio.sleep(0.4)
-        try:
-            n_after = await app.locator(_PATIENT_INFO_IFRAMES).count()
-        except Exception:
-            n_after = n
+        # Poll for the panel count to drop (up to 1 s) instead of a fixed wait.
+        n_after = n
+        for _ in range(10):
+            await asyncio.sleep(0.1)
+            try:
+                n_after = await app.locator(_PATIENT_INFO_IFRAMES).count()
+            except Exception:
+                n_after = n
+            if n_after < n:
+                break
         if n_after < n:
             closed += 1
         if not did_close or n_after >= n:

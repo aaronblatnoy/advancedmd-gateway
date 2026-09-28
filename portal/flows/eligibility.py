@@ -96,9 +96,18 @@ async def _empty_eligibility(available: bool, no_data: bool) -> dict:
     return d
 
 
+# Polling cadence. The only real limit is AMD's web app, so poll fast and
+# let the deadline (in seconds) stay what it was.
+_POLL_S = 0.25
+
+
+def _ticks(seconds: float) -> int:
+    return max(1, int(round(float(seconds) / _POLL_S)))
+
+
 async def _find_eligibility_frame(app, timeout_s: int = 20):
     """Return the frmEligibilityDetails frame once attached, else None."""
-    for _ in range(timeout_s):
+    for _ in range(_ticks(timeout_s)):
         for f in app.frames:
             if getattr(f, "name", None) == ELIGIBILITY_FRAME_NAME:
                 try:
@@ -108,13 +117,13 @@ async def _find_eligibility_frame(app, timeout_s: int = 20):
                     return f
                 except Exception:
                     pass
-        await asyncio.sleep(1)
+        await asyncio.sleep(_POLL_S)
     return None
 
 
 async def _wait_settled(frame, timeout_s: int = 20) -> None:
     """Wait for the async body to finish loading (bounded)."""
-    for _ in range(timeout_s):
+    for _ in range(_ticks(timeout_s)):
         try:
             loading = await frame.locator(_LOADING).count()
             has_body = await frame.locator(f"{_BODY_INNER} > *").count()
@@ -123,7 +132,7 @@ async def _wait_settled(frame, timeout_s: int = 20) -> None:
             loading, has_body, has_nodata = 1, 0, False
         if has_nodata or (loading == 0 and has_body > 0):
             return
-        await asyncio.sleep(1)
+        await asyncio.sleep(_POLL_S)
 
 
 async def _has_no_data(frame) -> bool:
@@ -307,7 +316,7 @@ async def _body_fingerprint(frame) -> tuple[int, int]:
 
 async def _wait_refresh_started(frame, before, *, timeout_s: int) -> bool:
     """True once the panel visibly begins reloading after the click."""
-    for _ in range(max(1, timeout_s)):
+    for _ in range(_ticks(timeout_s)):
         try:
             if await frame.locator(_LOADING).count():
                 return True
@@ -317,13 +326,13 @@ async def _wait_refresh_started(frame, before, *, timeout_s: int) -> bool:
                 return True
         except Exception:
             pass
-        await asyncio.sleep(1)
+        await asyncio.sleep(_POLL_S)
     return False
 
 
 async def _wait_status_readable(frame, *, timeout_s: int) -> bool:
     """True once a plan status value or the no-data banner is present."""
-    for _ in range(max(1, timeout_s)):
+    for _ in range(_ticks(timeout_s)):
         try:
             if await _has_no_data(frame):
                 return True
@@ -334,7 +343,7 @@ async def _wait_status_readable(frame, *, timeout_s: int) -> bool:
                 return True
         except Exception:
             pass
-        await asyncio.sleep(1)
+        await asyncio.sleep(_POLL_S)
     return False
 
 
@@ -343,7 +352,7 @@ async def _wait_no_data_stable(frame, *, hold_s: int) -> bool:
     loading indicator and no status value appearing. False the moment a
     status value shows up (the real 271 arrived) or loading resumes."""
     held = 0
-    for _ in range(max(1, hold_s) * 3):
+    for _ in range(_ticks(hold_s) * 3):
         try:
             if await frame.locator(_LOADING).count():
                 held = 0
@@ -356,12 +365,12 @@ async def _wait_no_data_stable(frame, *, hold_s: int) -> bool:
                 ).strip():
                     return False
                 held += 1
-                if held >= hold_s:
+                if held >= _ticks(hold_s):
                     return True
         except Exception:
             held = 0
-        await asyncio.sleep(1)
-    return held >= hold_s
+        await asyncio.sleep(_POLL_S)
+    return held >= _ticks(hold_s)
 
 
 def classify_plan_status(value: str | None) -> str:
@@ -564,7 +573,7 @@ async def close_eligibility_panel(app) -> bool:
                 await app.keyboard.press("Escape")
             except Exception:
                 pass
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(_POLL_S)
         if await _find_eligibility_frame(app, timeout_s=1) is None:
             log.info("flow=eligibility panel closed clicked=%s", clicked)
             return True
