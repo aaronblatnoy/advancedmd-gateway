@@ -4,8 +4,8 @@ Candidate rows, chart headers and search strings are PHI, so every question
 asked from here goes to the on-box s1-server (Winnow/Laya over Ollaya on
 black-sky). The hosted Jev API is never used from this module.
 
-Contract mirrors TypeSafe /v1/systemone: state + questions (choice/noul),
-answers carry probabilities we threshold in code.
+Contract mirrors TypeSafe /v1/systemone: state + questions (a dict keyed by
+question id; choice/noul), answers carry probabilities we threshold in code.
 """
 from __future__ import annotations
 
@@ -107,14 +107,13 @@ class PortalSystemOne:
         body = {
             "state": state,
             "model": self.model,
-            "questions": [
-                {
-                    "id": "q",
+            "questions": {
+                "q": {
                     "type": "choice",
                     "instructions": instructions,
                     "criteria": criteria,
                 }
-            ],
+            },
         }
         reply = await self._post(body)
         answer = _first_answer(reply)
@@ -134,7 +133,7 @@ class PortalSystemOne:
         body = {
             "state": state,
             "model": self.model,
-            "questions": [{"id": "q", "type": "noul", "instructions": instructions}],
+            "questions": {"q": {"type": "noul", "instructions": instructions}},
         }
         reply = await self._post(body)
         answer = _first_answer(reply)
