@@ -459,6 +459,32 @@ def _is_llm_recoverable(
     return False
 
 
+# One browser, one flow at a time. Computer-use has no AMD API rate limit
+# (that belongs to the XML gateway's queues, which this sidecar never
+# touches); its only real limits are the network and the fact that a single
+# Playwright page cannot be driven by two flows at once. Concurrent callers
+# therefore wait here instead of typing over each other. Per-event-loop so
+# tests and the console each get their own lock.
+_FLOW_LOCKS: dict[int, asyncio.Lock] = {}
+
+
+def _flow_lock() -> asyncio.Lock:
+    loop_id = id(asyncio.get_running_loop())
+    lock = _FLOW_LOCKS.get(loop_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _FLOW_LOCKS[loop_id] = lock
+    return lock
+
+
+def flow_lock_busy() -> bool:
+    """Whether a flow currently holds the browser (for /health)."""
+    try:
+        return _flow_lock().locked()
+    except RuntimeError:
+        return False
+
+
 async def run_flow(
     name: str, coro_fn, page, login_fn=None, checkpoints=None, **kwargs
 ) -> dict:
@@ -468,8 +494,27 @@ async def run_flow(
     If coro_fn accepts a ``checkpoints`` keyword it receives the run's
     Checkpoints instance. login_fn defaults to flows.login.ensure_logged_in
     (injectable in tests). A caller (the console) may pass its own
-    Checkpoints instance to observe progress live.
+    Checkpoints instance to observe progress live. Flows are serialized on
+    the single browser via ``_flow_lock``; the wait is reported in the
+    result as ``meta.browser_wait_ms`` when non-zero.
     """
+    lock = _flow_lock()
+    wait_started = time.monotonic()
+    async with lock:
+        waited_ms = int((time.monotonic() - wait_started) * 1000)
+        if waited_ms > 50:
+            log.info("flow=%s waited %sms for the browser", name, waited_ms)
+        result = await _run_flow_locked(
+            name, coro_fn, page, login_fn, checkpoints, **kwargs
+        )
+    if waited_ms > 50 and isinstance(result, dict):
+        result.setdefault("meta", {})["browser_wait_ms"] = waited_ms
+    return result
+
+
+async def _run_flow_locked(
+    name: str, coro_fn, page, login_fn=None, checkpoints=None, **kwargs
+) -> dict:
     if login_fn is None:
         from .login import ensure_logged_in as login_fn  # noqa: PLC0415
 

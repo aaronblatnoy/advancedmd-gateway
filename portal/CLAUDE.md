@@ -41,6 +41,16 @@ role (`phi_free_summary`), never labels.
 Session: call **`portal_login`** (alias `login`) to deterministically reopen a
 closed/expired web session; `portal_session_status` probes without logging in.
 
+## INV-PORTAL-NO-XML-QUEUE (MUST)
+
+Computer-use never shares the XML gateway's queues or rate clock: the AMD
+API rate limit belongs to `gateway/` (one request in flight, tier clock);
+this sidecar's only real limits are the network and its single browser.
+`portal/flows/_runner.run_flow` serializes flows on that browser with a
+per-event-loop lock (`_flow_lock`; `/health` reports `browser.busy`, results
+carry `meta.browser_wait_ms` when a caller waited). Callers reach the
+sidecar directly (`:8821`), never via `/v1/tools` on `:8820`.
+
 ## INV-PORTAL-LANGGRAPH (MUST)
 
 Portal flows are **LangGraphs of deterministic checkpoint nodes** with a

@@ -583,3 +583,30 @@ def test_capture_writes_stage_screenshots(tmp_path, monkeypatch):
     from pathlib import Path
 
     assert Path(rec["screenshot"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_run_flow_serializes_on_one_browser():
+    """Two concurrent flows never overlap on the single browser page."""
+    import asyncio
+    from portal.flows import _runner
+
+    active = {"n": 0, "max": 0}
+
+    async def slow_flow(page):
+        active["n"] += 1
+        active["max"] = max(active["max"], active["n"])
+        await asyncio.sleep(0.05)
+        active["n"] -= 1
+        return {"ok_field": True}
+
+    async def fake_login(page):
+        return page
+
+    results = await asyncio.gather(
+        _runner.run_flow("a", slow_flow, object(), login_fn=fake_login),
+        _runner.run_flow("b", slow_flow, object(), login_fn=fake_login),
+    )
+    assert active["max"] == 1
+    assert all(r["ok"] for r in results)
+    assert any("browser_wait_ms" in (r.get("meta") or {}) for r in results)

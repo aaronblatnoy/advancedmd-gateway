@@ -20,6 +20,7 @@ from portal.auth import (
     resolve_caller,
 )
 from portal.executor import execute_portal_tool
+from portal.flows._runner import flow_lock_busy as _flow_lock_busy
 from portal.registry import PORTAL_REGISTRY, list_tools, lookup, resolve_tool_name
 from portal.mcp_portal import mount_portal_mcp
 
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
             "browser": {
                 "logged_in": logged_in,
                 "pages": pages,
+                "busy": _flow_lock_busy(),
             },
         }
 
