@@ -23,7 +23,7 @@ async def test_graph_retries_stage_after_llm_recover(monkeypatch):
         if calls["scheduler"] == 1:
             raise BlockingDialogError("blocked")
 
-    async def fake_recovery(page, *, goal_stage):
+    async def fake_recovery(page, *, goal_stage, failure=""):
         calls["recovery"] += 1
         return True, 2
 

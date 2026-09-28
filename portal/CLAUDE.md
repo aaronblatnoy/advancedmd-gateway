@@ -30,13 +30,27 @@ for this one.
 - **`amd-portal-console`** (`127.0.0.1:8811`) is operator-only selector recording /
   verification — not a production integration surface.
 
-Recovery LLM: **`PORTAL_LLM_BASE_URL`** → on-box llm-server. Hosted models are forbidden.
-Its input is TEXT (2026-09-27): `recovery/observe.py` builds an outline of every visible
+Recovery decisions (2026-09-28, owner design): when a stage hits a state that is not
+in its script, **System One on s1-server** decides, in two steps
+(`portal/recovery/decide.py`):
+1. **Noul** `assess_stall`: is this a recoverable UI blocker one listed click or key
+   could clear, versus a dead session / login screen / unfixable state? Below
+   `PORTAL_S1_RECOVERY_NOUL_MIN` (0.60) the loop aborts at once.
+2. **Choice** `choose_recovery_action`: which ONE action gets back to the goal. Criteria
+   are the observed refs (dialog and close controls ranked first, capped at
+   `PORTAL_S1_RECOVERY_MAX_CONTROLS`=40) plus Escape, Enter and `none`. Used only above
+   `PORTAL_S1_RECOVERY_CHOICE_MIN` (0.50) and never on `none`.
+The deterministic goal probes (`recovery/stages.py`) run between steps; the step cap and
+the tried-actions history stay in code. State carries the goal, the PHI-free failure
+description, the outline and what was tried. Applies to EVERY portal tool because all of
+them enter recovery through `run_flow` or the insurance graph's `llm_recover` node.
+`PORTAL_RECOVERY_DECIDER=ollama` keeps the legacy tool-calling chat model
+(`PORTAL_LLM_BASE_URL`, on-box llm-server) for comparison; hosted models are forbidden.
+The observation is TEXT: `recovery/observe.py` builds an outline of every visible
 interactable control across the page and all iframes (`<ref> <role> "<label>"`), with
 forbidden controls (Check Eligibility, Save, Submit, Sign, Log out, Delete) removed
-before the model sees it. A screenshot is optional (`PORTAL_RECOVERY_SCREENSHOT=1`).
-Actions are refs from that outline plus Escape/Enter only. Logs get counts per frame and
-role (`phi_free_summary`), never labels.
+before any model sees it. Actions are refs from that outline plus Escape/Enter only.
+Logs get counts, probabilities and class names (`phi_free_summary`), never labels.
 
 Session: call **`portal_login`** (alias `login`) to deterministically reopen a
 closed/expired web session; `portal_session_status` probes without logging in.
@@ -128,6 +142,7 @@ its safety properties are structural instead:
 | `portal/llm/ollama.py` | Local llm-server/Ollama adapter (`phi_safe=True`) |
 | `portal/llm/system_one.py` | s1-server System One client (Choice/Noul; `phi_safe=True`) |
 | `portal/graphs/disambiguate.py` | System One patient-row pick when search is ambiguous (policy thresholds in code) |
+| `portal/recovery/decide.py` | System One recovery: Noul (recoverable?) then Choice (which listed action); thresholds and caps in code |
 | `portal/console.py` | Aaron-only test console (`amd-portal-console`, `127.0.0.1:8811` on black-sky) |
 | `tests/portal/` | pytest suite (FakePage, no browser/network) |
 | `docs/portal/` | TOOLS.md, TRACES.md, testing.md, navigation docs |

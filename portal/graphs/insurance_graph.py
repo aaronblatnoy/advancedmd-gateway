@@ -272,7 +272,12 @@ async def llm_recover_node(state: InsuranceGraphState) -> dict:
 
     stage = state.get("retry_stage") or state.get("failed_stage") or "unknown"
     flow = state["flow"]
-    recovered, steps = await run_recovery(flow.page, goal_stage=stage)
+    from portal.flows._runner import _safe_message
+
+    exc = state.get("last_error")
+    recovered, steps = await run_recovery(
+        flow.page, goal_stage=stage, failure=_safe_message(exc) if exc else ""
+    )
     flow.checkpoints.recovery_steps += steps
     flow.checkpoints.note_recovery(stage, cleared=recovered)
     total = int(state.get("recovery_steps") or 0) + steps

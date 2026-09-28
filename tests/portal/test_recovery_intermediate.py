@@ -14,7 +14,7 @@ async def test_dismiss_with_recovery_skips_llm_when_clear(monkeypatch):
     async def fake_dismiss(page):
         return False
 
-    async def fake_recovery(page, *, goal_stage):
+    async def fake_recovery(page, *, goal_stage, failure=""):
         calls["recovery"] += 1
         return True, 1
 
@@ -38,7 +38,7 @@ async def test_dismiss_with_recovery_calls_local_llm(monkeypatch):
     async def fake_dismiss(page):
         return seen.get("pass", True)
 
-    async def fake_recovery(page, *, goal_stage):
+    async def fake_recovery(page, *, goal_stage, failure=""):
         seen["goal"] = goal_stage
         seen["pass"] = False
         return True, 2
@@ -68,7 +68,7 @@ async def test_attempt_stage_retries_after_recovery(monkeypatch):
             raise BlockingDialogError("blocked")
         return "ok"
 
-    async def fake_recovery(page, *, goal_stage):
+    async def fake_recovery(page, *, goal_stage, failure=""):
         return True, 1
 
     monkeypatch.setattr(

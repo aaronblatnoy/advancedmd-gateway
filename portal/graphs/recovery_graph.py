@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from portal.llm.ollama import OllamaRecoveryLLM, RecoveryLLMError
 from portal.recovery.actions import execute_recovery_action, press_key
+from portal.recovery.decide import assess_stall, choose_recovery_action
 from portal.recovery.observe import ObservedAction, format_observation, observe_page
 from portal.recovery.stages import stage_goal_met
 
@@ -18,6 +19,12 @@ log = logging.getLogger("portal.graphs.recovery")
 __all__ = ["run_recovery", "MAX_RECOVERY_STEPS"]
 
 MAX_RECOVERY_STEPS = int(os.environ.get("PORTAL_RECOVERY_MAX_STEPS", "5"))
+
+
+def _decider() -> str:
+    """``s1`` (default): Noul then Choice on s1-server. ``ollama``: legacy
+    tool-calling chat model, kept for comparison."""
+    return (os.environ.get("PORTAL_RECOVERY_DECIDER", "s1") or "s1").strip().lower()
 
 _RECOVERY_TOOLS = [
     {
@@ -102,6 +109,9 @@ def _merge_results(existing: list[str], new: list[str]) -> list[str]:
 class RecoveryState(TypedDict, total=False):
     page: Any
     goal_stage: str
+    failure: str
+    dialog_seen: bool
+    assessed: bool
     step: int
     max_steps: int
     last_results: Annotated[list[str], _merge_results]
@@ -118,7 +128,43 @@ async def _observe_node(state: RecoveryState) -> dict:
         return {"recovered": True, "actions": actions}
     if not dialog_seen and goal_stage == "unknown":
         return {"recovered": True, "actions": actions}
-    return {"actions": actions}
+    return {"actions": actions, "dialog_seen": dialog_seen}
+
+
+def _goal_text(goal_stage: str) -> str:
+    return _STAGE_HINTS.get(goal_stage or "", f"Goal: resume stage {goal_stage}.")
+
+
+async def _s1_node(state: RecoveryState) -> dict:
+    """Noul (is this recoverable?) once, then a Choice per step."""
+    step = int(state.get("step") or 0)
+    page = state["page"]
+    actions = state.get("actions") or []
+    goal_stage = state.get("goal_stage") or "unknown"
+    common = dict(
+        goal_stage=goal_stage,
+        goal_text=_goal_text(goal_stage),
+        failure=state.get("failure") or "",
+        actions=actions,
+        dialog_seen=bool(state.get("dialog_seen")),
+        tried=list(state.get("last_results") or []),
+    )
+    patch: dict = {}
+    if not state.get("assessed"):
+        verdict = await assess_stall(**common)
+        patch["assessed"] = True
+        if not verdict.recoverable:
+            log.info("recovery s1 noul declined reason=%s", verdict.reason)
+            return {**patch, "aborted": True, "last_results": [f"noul:{verdict.reason}"]}
+    decision = await choose_recovery_action(**common)
+    if decision.kind == "click":
+        result = await execute_recovery_action(page, actions, decision.ref)
+        return {**patch, "step": step + 1, "last_results": [result]}
+    if decision.kind == "press":
+        result = await press_key(page, decision.key)
+        return {**patch, "step": step + 1, "last_results": [result]}
+    log.info("recovery s1 choice declined reason=%s", decision.reason)
+    return {**patch, "aborted": True, "last_results": [f"choice:{decision.reason}"]}
 
 
 async def _llm_node(state: RecoveryState) -> dict:
@@ -128,6 +174,8 @@ async def _llm_node(state: RecoveryState) -> dict:
     max_steps = int(state.get("max_steps") or MAX_RECOVERY_STEPS)
     if step >= max_steps:
         return {"aborted": True}
+    if _decider() != "ollama":
+        return await _s1_node(state)
     page = state["page"]
     actions = state.get("actions") or []
     obs_text = format_observation(
@@ -219,13 +267,22 @@ def _graph():
     return _COMPILED
 
 
-async def run_recovery(page, *, goal_stage: str) -> tuple[bool, int]:
-    """Run bounded recovery. Returns (recovered, steps_taken)."""
+async def run_recovery(
+    page, *, goal_stage: str, failure: str = ""
+) -> tuple[bool, int]:
+    """Run bounded recovery. Returns (recovered, steps_taken).
+
+    ``failure`` is the PHI-free description of what stopped the stage
+    (exception class, selector fragment); it goes into the System One state.
+    """
     if os.environ.get("PORTAL_RECOVERY_ENABLED", "1") == "0":
         return False, 0
     initial: RecoveryState = {
         "page": page,
         "goal_stage": goal_stage or "unknown",
+        "failure": failure or "",
+        "dialog_seen": False,
+        "assessed": False,
         "step": 0,
         "max_steps": MAX_RECOVERY_STEPS,
         "last_results": [],

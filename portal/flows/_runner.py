@@ -556,7 +556,8 @@ async def _run_flow_locked(
                 from portal.graphs.recovery_graph import run_recovery
 
                 recovered, recovery_steps = await run_recovery(
-                    page, goal_stage=cp.failed_stage or "unknown"
+                    page, goal_stage=cp.failed_stage or "unknown",
+                    failure=_safe_message(exc),
                 )
                 cp.recovery_steps += recovery_steps
                 cp.note_recovery(
