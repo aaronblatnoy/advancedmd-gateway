@@ -177,11 +177,10 @@ async def _log_scheduler_state(app: Page, where: str) -> None:
 async def describe_ui_state(app) -> dict:
     """PHI-free snapshot for diagnosing a blocked scheduler.
 
-    Returns frame names (structural identifiers) and the accessible names of
-    visible buttons inside any visible dialog (fixed UI labels such as
-    "OK" / "Close"). Never page text.
+    Frame names (structural identifiers) plus the counts-only summary of the
+    full interactable outline. Never labels, never page text.
     """
-    out: dict = {"frames": [], "dialog_buttons": []}
+    out: dict = {"frames": [], "summary": ""}
     try:
         out["frames"] = sorted(
             {str(getattr(f, "name", "") or "") for f in (getattr(app, "frames", None) or [])}
@@ -190,24 +189,9 @@ async def describe_ui_state(app) -> dict:
     except Exception:
         pass
     try:
-        from .login import _visible_dialog
-        for root in [app] + list(getattr(app, "frames", None) or []):
-            d = await _visible_dialog(root)
-            if d is None:
-                continue
-            btns = d.get_by_role("button")
-            n = await btns.count()
-            for i in range(min(n, 6)):
-                try:
-                    name = (await btns.nth(i).get_attribute("aria-label")) or (
-                        await btns.nth(i).inner_text(timeout=1000)
-                    )
-                except Exception:
-                    name = ""
-                name = (name or "").strip()
-                if 0 < len(name) <= 24 and name.replace(" ", "").isalpha():
-                    out["dialog_buttons"].append(name)
-            break
+        from ..recovery.observe import observe_page, phi_free_summary
+        actions, dialog_seen = await observe_page(app)
+        out["summary"] = phi_free_summary(actions, dialog_seen)
     except Exception:
         pass
     return out

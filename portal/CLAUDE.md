@@ -31,6 +31,12 @@ for this one.
   verification — not a production integration surface.
 
 Recovery LLM: **`PORTAL_LLM_BASE_URL`** → on-box llm-server. Hosted models are forbidden.
+Its input is TEXT (2026-09-27): `recovery/observe.py` builds an outline of every visible
+interactable control across the page and all iframes (`<ref> <role> "<label>"`), with
+forbidden controls (Check Eligibility, Save, Submit, Sign, Log out, Delete) removed
+before the model sees it. A screenshot is optional (`PORTAL_RECOVERY_SCREENSHOT=1`).
+Actions are refs from that outline plus Escape/Enter only. Logs get counts per frame and
+role (`phi_free_summary`), never labels.
 
 Session: call **`portal_login`** (alias `login`) to deterministically reopen a
 closed/expired web session; `portal_session_status` probes without logging in.

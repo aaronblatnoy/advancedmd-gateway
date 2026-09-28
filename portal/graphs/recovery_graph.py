@@ -24,7 +24,7 @@ _RECOVERY_TOOLS = [
         "type": "function",
         "function": {
             "name": "click",
-            "description": "Click one listed ref to dismiss a blocking dialog.",
+            "description": "Click one listed ref (a control from the outline).",
             "parameters": {
                 "type": "object",
                 "properties": {"ref": {"type": "string"}},
@@ -67,11 +67,15 @@ _RECOVERY_TOOLS = [
     },
 ]
 
-_SYSTEM = """You recover a stuck AdvancedMD portal automation step for get_insurance_details.
+_SYSTEM = """You recover a stuck AdvancedMD portal automation step.
+You are given a text outline of every visible control on the page and its frames, one per line:
+  <ref> <role> "<label>" [ (in dialog) ]
 Rules:
-- Dismiss blocking modals only (OK, Close, X). Never Save, Submit, Check Eligibility, Log out.
+- Act only through the listed refs: click a ref, or press Escape/Enter.
+- Prefer dismissing a blocking dialog (OK, Close, X, Escape). Otherwise take the one click that best moves toward the stated goal (for example opening the Scheduler tab or a Details control).
+- Never Save, Submit, Sign, Check Eligibility, or Log out. Those controls are not listed and must not be sought.
 - One tool call per turn.
-- Call done when the blocker is gone and the flow can continue. Call abort if unsure."""
+- Call done when the goal is met and the flow can continue. Call abort if unsure."""
 
 _STAGE_HINTS: dict[str, str] = {
     "scheduler_open": "Goal: Scheduler is open and the patient search combobox is visible.",
@@ -135,12 +139,15 @@ async def _llm_node(state: RecoveryState) -> dict:
     user = f"{obs_text}\n\nRecent:\n{history}\n\nChoose one recovery action."
 
     llm = OllamaRecoveryLLM()
+    # Text first. The outline above is the observation; a screenshot is an
+    # optional extra (PORTAL_RECOVERY_SCREENSHOT=1) for layout questions.
     image_b64 = None
-    try:
-        png = await page.screenshot(type="png")
-        image_b64 = base64.b64encode(png).decode("ascii")
-    except Exception:
-        pass
+    if os.environ.get("PORTAL_RECOVERY_SCREENSHOT", "0") == "1":
+        try:
+            png = await page.screenshot(type="png")
+            image_b64 = base64.b64encode(png).decode("ascii")
+        except Exception:
+            pass
 
     try:
         if not await llm.available():

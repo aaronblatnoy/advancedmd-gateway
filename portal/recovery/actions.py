@@ -19,6 +19,19 @@ async def execute_recovery_action(
         return f"unknown ref {ref}"
     frames = getattr(page, "frames", None)
     roots = list(frames) if frames else [page]
+    if frames and page not in roots:
+        roots = [page] + roots
+    # Prefer the frame the control was observed in; same-label controls are
+    # told apart by their observed position (nth).
+    same_frame = [r for r in roots if (getattr(r, "name", "") or "main") == match.frame_hint]
+    for root in same_frame:
+        try:
+            loc = root.get_by_role(match.role, name=match.label, exact=True)
+            if await loc.count() > match.nth:
+                await loc.nth(match.nth).click(timeout=3000)
+                return f"clicked {ref} {match.role} in {match.frame_hint}"
+        except Exception:
+            continue
     for root in roots:
         if match.role == "icon" and match.label == "close":
             for sel in ("i.amds-click-out-x", 'button[aria-label="Close"]', ".close"):

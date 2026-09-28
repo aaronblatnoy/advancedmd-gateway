@@ -70,8 +70,7 @@ async def stage_session_and_scheduler(state: InsuranceFlowState) -> None:
                     ui = await describe_ui_state(app)
                     log.warning("stage=scheduler_open blocked frames=%s",
                                 " ".join(ui.get("frames", []))[:160])
-                    log.warning("stage=scheduler_open blocked dialog_buttons=%s",
-                                " ".join(ui.get("dialog_buttons", []))[:160])
+                    log.warning("stage=scheduler_open blocked controls=%s", ui.get("summary", "")[:180])
                     n_pi = await app.locator(_PATIENT_INFO_IFRAMES_DIAG).count()
                     log.warning("stage=scheduler_open blocked patient_panels=%s", n_pi)
                 except Exception:
