@@ -424,7 +424,7 @@ async def test_graph_reports_blocked_eligibility_without_clicking(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_graph_check_mode_clicks_card_control_and_never_opens_details(monkeypatch):
-    monkeypatch.setenv("PORTAL_CHECK_VIA_CARD", "1")  # experimental path, off by default
+    monkeypatch.delenv("PORTAL_CHECK_VIA_CARD", raising=False)  # default path
     _stub_downstream(monkeypatch)
     fired = {"n": 0}
 
@@ -482,10 +482,10 @@ async def test_next_search_move_offers_retype_and_untried_identifiers_only(monke
 
 
 @pytest.mark.asyncio
-async def test_graph_check_mode_default_uses_details_panel_click(monkeypatch):
-    """Default (PORTAL_CHECK_VIA_CARD unset): open Details, click inside the
+async def test_graph_check_mode_fallback_uses_details_panel_click(monkeypatch):
+    """Fallback (PORTAL_CHECK_VIA_CARD=0): open Details, click inside the
     frame, read the panel, close it. The card control is never used."""
-    monkeypatch.delenv("PORTAL_CHECK_VIA_CARD", raising=False)
+    monkeypatch.setenv("PORTAL_CHECK_VIA_CARD", "0")
     _stub_downstream(monkeypatch)
     seen = {"details": 0, "fired": 0, "closed": 0, "card": 0}
 

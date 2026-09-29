@@ -162,18 +162,21 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
                 data.update(elig)
                 return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
 
-            if os.environ.get("PORTAL_CHECK_VIA_CARD", "0") == "1":
-                # EXPERIMENTAL (off by default). Live 2026-09-29 13:43-14:03:
-                # the card control reported fired and even moved the card's
-                # Last cell, but AMD's stored 271 never advanced (25 of 29
-                # checks not registered). Kept behind a flag with a
-                # screenshot so the operator can see what that control does.
+            if os.environ.get("PORTAL_CHECK_VIA_CARD", "1") != "0":
+                # DEFAULT (owner flow, proven live 2026-09-29 14:36 on the
+                # test patient: stored 271 advanced within 40 s): in the
+                # insurance panel select the coverage row, then click the
+                # card's Check Eligibility (#btnEligibilityOnDemand). The
+                # 13:43 failure was clicking it with no row selected.
+                # PORTAL_CHECK_VIA_CARD=0 falls back to the Details-panel
+                # click below.
                 stage = "eligibility_check_fired"
                 from portal.flows.insurance import _ROW
 
                 async with flow.checkpoints.stage("eligibility_check_fired", flow.app):
                     fired = await fire_check_eligibility_on_card(
-                        flow.ins, grid_last_selector=f"{_ROW} td:nth-child(7)"
+                        flow.ins, insurance_index=flow.insurance_index,
+                        grid_last_selector=f"{_ROW} td:nth-child(7)",
                     )
                     try:
                         import time as _t
@@ -192,10 +195,11 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
                 data.update(elig)
                 return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
 
-            # Proven path (338 greens on 2026-09-28/29): open Details, click
-            # Check Eligibility inside frmEligibilityDetails, wait for the
-            # refresh, read the panel, close it. Green is still confirmed by
-            # the caller from the stored record.
+            # Fallback path (PORTAL_CHECK_VIA_CARD=0; 338 greens on
+            # 2026-09-28/29): open Details, click Check Eligibility inside
+            # frmEligibilityDetails, wait for the refresh, read the panel,
+            # close it. Green is still confirmed by the caller from the
+            # stored record.
             async with flow.checkpoints.stage("eligibility_details_open", flow.app):
                 frame = await open_eligibility_frame(flow.app, flow.ins)
             if frame is None:
