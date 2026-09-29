@@ -773,7 +773,10 @@ async def _log_controls(frame) -> None:
 async def _log_structure(root, where: str) -> None:
     """PHI-free: tag, class fragments matching close/icon, fixed button labels."""
     try:
-        items = await root.evaluate(_STRUCTURE_PROBE_JS)
+        if hasattr(root, "evaluate"):
+            items = await root.evaluate(_STRUCTURE_PROBE_JS)
+        else:  # FrameLocator (the insurance card): evaluate from its body element
+            items = await root.locator("body").evaluate(_STRUCTURE_PROBE_JS)
     except Exception as exc:
         log.info("flow=eligibility structure %s probe_failed=%s", where, type(exc).__name__)
         return
