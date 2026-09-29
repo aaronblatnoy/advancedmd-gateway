@@ -255,13 +255,13 @@ class _Search:
         self.results_by_text, self.typed, self.value = results_by_text, [], ""
         self._swallow = swallow_first
 
-    async def fill(self, v):
+    async def fill(self, v, timeout=None):
         self.value = v
 
-    async def click(self):
+    async def click(self, timeout=None):
         pass
 
-    async def press_sequentially(self, text, delay=0):
+    async def press_sequentially(self, text, delay=0, timeout=None):
         if self._swallow:
             self._swallow = False
             self.value = text[1:]
@@ -269,7 +269,7 @@ class _Search:
             self.value = text
         self.typed.append(self.value)
 
-    async def input_value(self):
+    async def input_value(self, timeout=None):
         return self.value
 
 

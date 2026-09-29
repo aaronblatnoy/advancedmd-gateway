@@ -163,19 +163,24 @@ def search_terms(patient: str, hint: str) -> list[tuple[str, str]]:
 async def _type_and_verify(search, text: str, attempts: int = 3) -> None:
     """Type into the scheduler search box and read it back. AMD's combobox
     can swallow the first keystroke while it attaches (live 2026-09-29:
-    'LOUIS ...' arrived as 'OUIS ...' and found nothing)."""
+    'LOUIS ...' arrived as 'OUIS ...' and found nothing).
+
+    Every helper action carries a short explicit timeout: Playwright's
+    default is 30 s and a swallowed timeout here cost exactly that on the
+    first live run of this code (2026-09-29 01:47).
+    """
     for attempt in range(attempts):
         try:
-            await search.fill("")
+            await search.fill("", timeout=2000)
         except Exception:
             pass
         try:
-            await search.click()
+            await search.click(timeout=2000)
         except Exception:
             pass
-        await search.press_sequentially(text, delay=20)
+        await search.press_sequentially(text, delay=20, timeout=10000)
         try:
-            typed = (await search.input_value()).strip()
+            typed = (await search.input_value(timeout=2000)).strip()
         except Exception:
             typed = text
         if typed == text:
