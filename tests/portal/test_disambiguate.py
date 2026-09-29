@@ -424,6 +424,7 @@ async def test_graph_reports_blocked_eligibility_without_clicking(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_graph_check_mode_clicks_card_control_and_never_opens_details(monkeypatch):
+    monkeypatch.setenv("PORTAL_CHECK_VIA_CARD", "1")  # experimental path, off by default
     _stub_downstream(monkeypatch)
     fired = {"n": 0}
 
@@ -478,3 +479,45 @@ async def test_next_search_move_offers_retype_and_untried_identifiers_only(monke
     monkeypatch.setattr(sd, "MAX_SEARCH_MOVES", 2)
     move, d = await sd.next_search_move(available=available, tried=tried2, s1=_S1("retype_name"))
     assert move == "not_found" and d["reason"] == "max_moves"
+
+
+@pytest.mark.asyncio
+async def test_graph_check_mode_default_uses_details_panel_click(monkeypatch):
+    """Default (PORTAL_CHECK_VIA_CARD unset): open Details, click inside the
+    frame, read the panel, close it. The card control is never used."""
+    monkeypatch.delenv("PORTAL_CHECK_VIA_CARD", raising=False)
+    _stub_downstream(monkeypatch)
+    seen = {"details": 0, "fired": 0, "closed": 0, "card": 0}
+
+    async def not_disabled(ins):
+        return False
+
+    async def fake_open(app, ins):
+        seen["details"] += 1
+        return object()
+
+    async def fake_fire(frame, **kw):
+        seen["fired"] += 1
+
+    async def fake_read(frame):
+        return {"eligibility_available": True, "eligibility_plan_status": "Active", "eligibility_no_data": False}
+
+    async def fake_close(app):
+        seen["closed"] += 1
+
+    async def never_card(ins, **kw):
+        seen["card"] += 1
+        raise AssertionError("card control must not be used by default")
+
+    monkeypatch.setattr(ig, "check_eligibility_disabled", not_disabled)
+    monkeypatch.setattr(ig, "details_disabled", not_disabled)
+    monkeypatch.setattr(ig, "open_eligibility_frame", fake_open)
+    monkeypatch.setattr(ig, "fire_check_eligibility", fake_fire)
+    monkeypatch.setattr(ig, "read_eligibility_from_frame", fake_read)
+    monkeypatch.setattr(ig, "close_eligibility_panel", fake_close)
+    monkeypatch.setattr(ig, "fire_check_eligibility_on_card", never_card)
+    monkeypatch.setattr(ig, "stage_patient_found", _noop)
+
+    data = await ig.run_check_eligibility_graph(object(), "Test, Patient", checkpoints=Checkpoints(capture=False))
+    assert seen == {"details": 1, "fired": 1, "closed": 1, "card": 0}
+    assert data["eligibility_click_fired"] is True and data["eligibility_outcome"] == "active"

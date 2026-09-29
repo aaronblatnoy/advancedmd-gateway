@@ -11,6 +11,7 @@ See ``memory/decisions/2026-09-02-portal-flows-langgraph-deterministic-plus-llm.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any, Literal, TypedDict
 
@@ -148,36 +149,69 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
     try:
         comment = str((state.get("data") or {}).get("eligibility_status") or "")
         if mode == "check_eligibility":
-            # Owner 2026-09-29: click Check Eligibility on the card itself; no
-            # Details panel, no 271 scrape. Green is confirmed by the caller
-            # from the stored record (getdemographic). A disabled control is
-            # AMD refusing the plan: report it, do not click or wait.
-            stage = "eligibility_check_fired"
-            if await check_eligibility_disabled(flow.ins):
+            # Blocked plan: AMD disables both Details and Check Eligibility
+            # (missing payer ID, invalid subscriber). Report, never click.
+            if await check_eligibility_disabled(flow.ins) or await details_disabled(flow.ins):
                 elig = await blocked_eligibility(comment)
                 flow.checkpoints.note(
-                    f"eligibility blocked by AMD: {elig['eligibility_blocked_reason']} (Check Eligibility disabled)"
+                    f"eligibility blocked by AMD: {elig['eligibility_blocked_reason']} (controls disabled)"
                 )
                 log.info("insurance_graph eligibility blocked reason=%s mode=%s",
                          elig["eligibility_blocked_reason"], mode)
                 data = dict(state.get("data") or {})
                 data.update(elig)
                 return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
-            from portal.flows.insurance import _ROW
 
+            if os.environ.get("PORTAL_CHECK_VIA_CARD", "0") == "1":
+                # EXPERIMENTAL (off by default). Live 2026-09-29 13:43-14:03:
+                # the card control reported fired and even moved the card's
+                # Last cell, but AMD's stored 271 never advanced (25 of 29
+                # checks not registered). Kept behind a flag with a
+                # screenshot so the operator can see what that control does.
+                stage = "eligibility_check_fired"
+                from portal.flows.insurance import _ROW
+
+                async with flow.checkpoints.stage("eligibility_check_fired", flow.app):
+                    fired = await fire_check_eligibility_on_card(
+                        flow.ins, grid_last_selector=f"{_ROW} td:nth-child(7)"
+                    )
+                    try:
+                        import time as _t
+                        from pathlib import Path as _P
+
+                        d = _P(os.environ.get("AMD_PORTAL_DEBUG_DIR", "runtime/debug"))
+                        d.mkdir(parents=True, exist_ok=True)
+                        await flow.app.screenshot(path=str(d / f"card-click-{_t.strftime('%Y%m%d-%H%M%S')}.png"))
+                    except Exception:
+                        pass
+                elig = await read_eligibility_from_frame(None)
+                elig["eligibility_click_fired"] = bool(fired.get("fired"))
+                elig["eligibility_grid_refreshed"] = bool(fired.get("grid_last_changed"))
+                elig["eligibility_outcome"] = "unverifiable"
+                data = dict(state.get("data") or {})
+                data.update(elig)
+                return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
+
+            # Proven path (338 greens on 2026-09-28/29): open Details, click
+            # Check Eligibility inside frmEligibilityDetails, wait for the
+            # refresh, read the panel, close it. Green is still confirmed by
+            # the caller from the stored record.
+            async with flow.checkpoints.stage("eligibility_details_open", flow.app):
+                frame = await open_eligibility_frame(flow.app, flow.ins)
+            if frame is None:
+                raise RuntimeError("eligibility frame missing; cannot Check Eligibility")
+            stage = "eligibility_check_fired"
             async with flow.checkpoints.stage("eligibility_check_fired", flow.app):
-                fired = await fire_check_eligibility_on_card(
-                    flow.ins, grid_last_selector=f"{_ROW} td:nth-child(7)"
-                )
-            elig = await read_eligibility_from_frame(None)
-            elig["eligibility_click_fired"] = bool(fired.get("fired"))
-            elig["eligibility_grid_refreshed"] = bool(fired.get("grid_last_changed"))
-            # The click fired; the carrier answers asynchronously and the
-            # stored record is the verdict source, so the portal's own
-            # closed outcome here is honestly "unverifiable".
-            elig["eligibility_outcome"] = "unverifiable"
+                await fire_check_eligibility(frame)
+            elig = await read_eligibility_from_frame(frame)
+            elig["eligibility_click_fired"] = True
+            try:
+                await close_eligibility_panel(flow.app)
+            except Exception:
+                pass
             data = dict(state.get("data") or {})
             data.update(elig)
+            data["eligibility_outcome"] = closed_outcome(data)
             return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
 
         # Read-only modes: Details shows the on-file 271.
