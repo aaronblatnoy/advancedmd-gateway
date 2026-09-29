@@ -145,30 +145,42 @@ def row_matches_name(row_text: str, name: str) -> bool:
 
 
 def search_terms(patient: str, hint: str) -> list[tuple[str, str]]:
-    """Ordered (kind, text) search attempts. Name first as 'Last, First',
-    then date of birth, then the raw digits when nothing else is known."""
+    """Ordered (kind, text) search attempts. Owner 2026-09-29: date of birth
+    first (exact, spelling-proof), then 'Last, First', then raw digits."""
     chart = patient if patient.strip().isdigit() else chart_from_hint(hint)
     name = name_from_hint(hint) or ("" if patient.strip().isdigit() else patient)
     dob = dob_from_hint(hint)
     terms: list[tuple[str, str]] = []
-    if name:
-        terms.append(("name", last_first(name)))
     if dob:
         terms.append(("dob", dob))
+    if name:
+        terms.append(("name", last_first(name)))
     if chart and not terms:
         terms.append(("chart", chart))
     return terms
 
 
-async def _type_and_verify(search, text: str, attempts: int = 3) -> None:
-    """Type into the scheduler search box and read it back. AMD's combobox
-    can swallow the first keystroke while it attaches (live 2026-09-29:
-    'LOUIS ...' arrived as 'OUIS ...' and found nothing).
+def _last_name(name: str) -> str:
+    lf = last_first(name)
+    return _norm(lf.split(",")[0]) if lf else ""
+
+
+def row_plausible(row_text: str, name: str) -> bool:
+    """Loose guard for fan-out candidates: the row carries the last name."""
+    ln = _last_name(name)
+    return bool(ln) and ln in _norm(row_text)
+
+
+async def _type_and_verify(search, text: str, attempts: int = 3) -> str:
+    """Type into the scheduler search box and read it back; returns what the
+    box showed. AMD's combobox can swallow the first keystroke while it
+    attaches (live 2026-09-29: 'LOUIS ...' arrived as 'OUIS ...').
 
     Every helper action carries a short explicit timeout: Playwright's
     default is 30 s and a swallowed timeout here cost exactly that on the
-    first live run of this code (2026-09-29 01:47).
+    first live run of this code.
     """
+    typed = ""
     for attempt in range(attempts):
         try:
             await search.fill("", timeout=2000)
@@ -184,19 +196,39 @@ async def _type_and_verify(search, text: str, attempts: int = 3) -> None:
         except Exception:
             typed = text
         if typed == text:
-            return
+            return typed
         log.info("flow=insurance search text mismatch; retyping (attempt %s)", attempt + 1)
     log.warning("flow=insurance search text still mismatched after %s attempts", attempts)
+    return typed
+
+
+async def _rows_for(sched, kind: str, text: str):
+    options = sched.get_by_role("option")
+    if kind == "chart":
+        result = options.filter(has_text=re.compile(rf"\b{re.escape(text)}\s*-"))
+    elif kind == "name":
+        result = options.filter(has_text=re.compile(re.escape(text), re.I))
+    else:
+        result = options  # dob search: every row shown shares the dob
+    try:
+        await result.first.wait_for(state="visible", timeout=10000)
+    except Exception as exc:
+        if type(exc).__name__ != "TimeoutError":
+            raise
+        return result, []
+    texts = [t.strip() for t in await result.all_inner_texts()]
+    return result, texts
 
 
 async def stage_patient_found(state: InsuranceFlowState) -> None:
-    """Find and click the patient's scheduler row. Deterministic; System One
-    only for a residual ambiguity.
+    """Find and click the patient's scheduler row.
 
-    Owner rules (2026-09-29): search 'Last, First'; if empty search by date
-    of birth; match the name in code; if several rows still fit, let Winnow
-    decide (the graph asks it, then fans out if it declines). A known chart
-    number always picks its row in code.
+    Owner rules (2026-09-29): search by date of birth (mm/dd/yyyy) first and
+    match the name among the rows; a known chart number picks its row in
+    code; an exact 'Last, First' match picks in code; when the names differ
+    or several rows fit, Winnow chooses (graph node) and, if it cannot,
+    every plausible row is checked. When a search returns nothing, Winnow
+    decides the next move (retype, switch identifier, stop).
     """
     app = state.app
     sched = state.sched
@@ -206,66 +238,79 @@ async def stage_patient_found(state: InsuranceFlowState) -> None:
     cp = state.checkpoints
     chart = patient if patient.isdigit() else chart_from_hint(hint)
     name = name_from_hint(hint) or ("" if patient.isdigit() else patient)
+    dob = dob_from_hint(hint)
+    available = {"dob": dob, "name": last_first(name) if name else "", "chart": chart}
     terms = search_terms(patient, hint)
 
     async with cp.stage("patient_found", app):
         if not terms:
             raise PatientNotFoundError("no searchable key (no name, dob or chart)")
-        for kind, text in terms:
-            await _type_and_verify(search, text)
+        from portal.graphs.search_decide import MAX_SEARCH_MOVES, next_search_move
+
+        tried: list[dict] = []
+        kind, text = terms[0]
+        while True:
+            typed = await _type_and_verify(search, text)
             log.info("flow=insurance patient search submitted by=%s", kind)
-            options = sched.get_by_role("option")
-            if kind == "chart":
-                result = options.filter(has_text=re.compile(rf"\b{re.escape(text)}\s*-"))
-            elif kind == "name":
-                result = options.filter(has_text=re.compile(re.escape(text), re.I))
-            else:
-                result = options  # dob search: every row shown shares the dob
-            try:
-                await result.first.wait_for(state="visible", timeout=10000)
-            except Exception as exc:
-                if type(exc).__name__ != "TimeoutError":
-                    raise
-                log.info("flow=insurance no rows by=%s", kind)
-                continue
-            n = await result.count()
-            texts = [t.strip() for t in await result.all_inner_texts()]
+            result, texts = await _rows_for(sched, kind, text)
+            n = len(texts)
+            tried.append({"kind": kind, "typed": text, "field_showed": typed, "rows": n})
 
-            if chart:
-                matches = [i for i, t in enumerate(texts) if _row_chart(t) == chart]
-                if len(matches) == 1:
-                    await result.nth(matches[0]).click()
-                    log.info("flow=insurance patient selected by chart by=%s rows=%s", kind, n)
+            if n:
+                if chart:
+                    matches = [i for i, t in enumerate(texts) if _row_chart(t) == chart]
+                    if len(matches) == 1:
+                        await result.nth(matches[0]).click()
+                        log.info("flow=insurance patient selected by chart by=%s rows=%s", kind, n)
+                        return
+                if name:
+                    exact = [i for i, t in enumerate(texts) if row_matches_name(t, name)]
+                    if len(exact) == 1:
+                        await result.nth(exact[0]).click()
+                        log.info("flow=insurance patient selected by name match by=%s rows=%s", kind, n)
+                        return
+                    # Owner 2026-09-29: the rows share the date of birth; System
+                    # One decides who the patient is from the name (spelling
+                    # variants allowed). Fan-out, if it declines, is limited to
+                    # rows carrying the last name.
+                    pool = list(range(n))
+                    fanout = [texts[i] for i in pool if row_plausible(texts[i], name)]
+                else:
+                    pool = list(range(n))
+                    fanout = [texts[i] for i in pool]
+                if len(pool) == 1 and not name:
+                    await result.nth(pool[0]).click()
+                    log.info("flow=insurance patient selected (single row) by=%s", kind)
                     return
-                if not matches:
-                    log.info("flow=insurance rows=%s by=%s carry no matching chart", n, kind)
-                    continue
-
-            if name:
-                named = [i for i, t in enumerate(texts) if row_matches_name(t, name)]
-                if len(named) == 1:
-                    await result.nth(named[0]).click()
-                    log.info("flow=insurance patient selected by name match by=%s rows=%s", kind, n)
+                cand = [texts[i] for i in pool]
+                chosen = state.chosen_candidate
+                if chosen and chosen in cand:
+                    await result.nth(pool[cand.index(chosen)]).click()
+                    log.info("flow=insurance patient selected via system_one candidates=%s", len(cand))
                     return
-                if not named:
-                    log.info("flow=insurance rows=%s by=%s but none match the name", n, kind)
-                    continue
-                texts = [texts[i] for i in named]
-                result_idx = named
-            else:
-                result_idx = list(range(n))
+                if fanout or not name:
+                    log.info("flow=insurance patient rows need a judgment candidates=%s fanout=%s by=%s",
+                             len(cand), len(fanout), kind)
+                    raise AmbiguousMatchError(candidates=cand, fanout_candidates=fanout)
+                log.info("flow=insurance rows=%s by=%s but none carry the last name", n, kind)
 
-            if len(result_idx) == 1:
-                await result.nth(result_idx[0]).click()
-                log.info("flow=insurance patient selected (single row) by=%s", kind)
-                return
-            chosen = state.chosen_candidate
-            if chosen and chosen in texts:
-                await result.nth(result_idx[texts.index(chosen)]).click()
-                log.info("flow=insurance patient selected via system_one candidates=%s", len(texts))
-                return
-            log.info("flow=insurance patient search ambiguous candidates=%s by=%s", len(texts), kind)
-            raise AmbiguousMatchError(candidates=texts)
+            # No usable rows: Winnow decides the next move.
+            if len(tried) >= MAX_SEARCH_MOVES:
+                break
+            move, details = await next_search_move(available=available, tried=tried)
+            cp.note(f"search move after empty result: {move} ({details.get('reason')})")
+            if move == "not_found":
+                break
+            if move.startswith("retype_"):
+                kind = move[len("retype_"):]
+                text = available.get(kind) or text
+            elif move.startswith("search_"):
+                kind = move[len("search_"):]
+                text = available.get(kind, "")
+                if not text:
+                    break
+            else:
+                break
         raise PatientNotFoundError("no search result matched the query")
 
 

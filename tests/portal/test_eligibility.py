@@ -177,6 +177,8 @@ def test_eligibility_fields_whitelist_is_fixed():
     assert eligibility.ELIGIBILITY_FIELDS == [
         "eligibility_blocked",
         "eligibility_blocked_reason",
+        "eligibility_click_fired",
+        "eligibility_grid_refreshed",
         "eligibility_available",
         "eligibility_no_data",
         "eligibility_plan_status",

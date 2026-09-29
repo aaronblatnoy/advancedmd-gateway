@@ -20,9 +20,11 @@ from portal.flows._runner import Checkpoints
 from portal.flows.eligibility import (
     ELIGIBILITY_FIELDS,
     blocked_eligibility,
+    check_eligibility_disabled,
     close_eligibility_panel,
     details_disabled,
     fire_check_eligibility,
+    fire_check_eligibility_on_card,
     open_eligibility_frame,
     read_eligibility_from_frame,
 )
@@ -143,60 +145,55 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
     mode = state.get("mode") or "full"
     stage = "eligibility_details_open"
     try:
-        # Deterministic pre-check: a plan AMD cannot check renders Details
-        # disabled (missing payer ID, invalid subscriber). Do not click, do
-        # not wait 30 s, do not treat it as a portal fault: report it.
+        comment = str((state.get("data") or {}).get("eligibility_status") or "")
+        if mode == "check_eligibility":
+            # Owner 2026-09-29: click Check Eligibility on the card itself; no
+            # Details panel, no 271 scrape. Green is confirmed by the caller
+            # from the stored record (getdemographic). A disabled control is
+            # AMD refusing the plan: report it, do not click or wait.
+            stage = "eligibility_check_fired"
+            if await check_eligibility_disabled(flow.ins):
+                elig = await blocked_eligibility(comment)
+                flow.checkpoints.note(
+                    f"eligibility blocked by AMD: {elig['eligibility_blocked_reason']} (Check Eligibility disabled)"
+                )
+                log.info("insurance_graph eligibility blocked reason=%s mode=%s",
+                         elig["eligibility_blocked_reason"], mode)
+                data = dict(state.get("data") or {})
+                data.update(elig)
+                return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
+            from portal.flows.insurance import _ROW
+
+            async with flow.checkpoints.stage("eligibility_check_fired", flow.app):
+                fired = await fire_check_eligibility_on_card(
+                    flow.ins, grid_last_selector=f"{_ROW} td:nth-child(7)"
+                )
+            elig = await read_eligibility_from_frame(None)
+            elig["eligibility_click_fired"] = bool(fired.get("fired"))
+            elig["eligibility_grid_refreshed"] = bool(fired.get("grid_last_changed"))
+            data = dict(state.get("data") or {})
+            data.update(elig)
+            return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
+
+        # Read-only modes: Details shows the on-file 271.
         if await details_disabled(flow.ins):
-            comment = str((state.get("data") or {}).get("eligibility_status") or "")
             elig = await blocked_eligibility(comment)
             flow.checkpoints.note(
                 f"eligibility blocked by AMD: {elig['eligibility_blocked_reason']} (Details disabled)"
             )
-            log.info(
-                "insurance_graph eligibility blocked reason=%s mode=%s",
-                elig["eligibility_blocked_reason"], mode,
-            )
+            log.info("insurance_graph eligibility blocked reason=%s mode=%s",
+                     elig["eligibility_blocked_reason"], mode)
             data = dict(state.get("data") or {})
             data.update(elig)
             return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
-        async with flow.checkpoints.stage(
-            "eligibility_details_open", flow.app
-        ):
+        async with flow.checkpoints.stage("eligibility_details_open", flow.app):
             frame = await open_eligibility_frame(flow.app, flow.ins)
-        if mode == "check_eligibility":
-            if frame is None:
-                raise RuntimeError(
-                    "eligibility frame missing; cannot Check Eligibility"
-                )
-            stage = "eligibility_check_fired"
-            async with flow.checkpoints.stage(
-                "eligibility_check_fired", flow.app
-            ):
-                await fire_check_eligibility(frame)
-        if frame is None:
-            elig = await read_eligibility_from_frame(None)
-        else:
-            elig = await read_eligibility_from_frame(frame)
-        if mode == "check_eligibility":
-            # Leave the app in a state the next flow can use.
-            try:
-                await close_eligibility_panel(flow.app)
-            except Exception:
-                pass
+        elig = await read_eligibility_from_frame(frame)
         data = dict(state.get("data") or {})
         data.update(elig)
-        return {
-            "data": data,
-            "failed_stage": None,
-            "retry_stage": None,
-            "last_error": None,
-        }
+        return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
     except Exception as exc:
-        return {
-            "failed_stage": stage,
-            "retry_stage": stage,
-            "last_error": exc,
-        }
+        return {"failed_stage": stage, "retry_stage": stage, "last_error": exc}
 
 
 async def claims_address_node(state: InsuranceGraphState) -> dict:

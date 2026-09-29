@@ -307,79 +307,112 @@ ROW_KID = "10031229 - VBMD\nSHUMSKY, ELENA\n08/12/2009"
 
 
 def test_search_terms_order_and_normalisation():
+    # Owner 2026-09-29: date of birth first, then 'Last, First', digits only when nothing else.
     assert st.search_terms("2085", "chart number 2085; name: Elena Marie Shumsky; date of birth 02/07/1980") == [
-        ("name", "Shumsky, Elena"), ("dob", "02/07/1980")]
+        ("dob", "02/07/1980"), ("name", "Shumsky, Elena")]
     assert st.search_terms("2085", "") == [("chart", "2085")]
-    assert st.search_terms("Shumsky, Elena", "date of birth 02/07/1980") == [
-        ("name", "Shumsky, Elena"), ("dob", "02/07/1980")]
+    assert st.search_terms("Shumsky, Elena", "") == [("name", "Shumsky, Elena")]
     assert st.last_first("SHUMSKY, ELENA MARIE") == "SHUMSKY, ELENA"
     assert st.row_matches_name(ROW_A, "Elena Marie Shumsky") is True
     assert st.row_matches_name(ROW_A, "Custidero, Louis") is False
+    assert st.row_plausible("5 - VBMD\nSHUMSKI, ELENA\n02/07/1980", "Shumsky, Elena") is False
+    assert st.row_plausible(ROW_B, "Elena Shumsky") is True
 
 
 @pytest.mark.asyncio
-async def test_stage_retypes_when_first_keystroke_is_swallowed_and_picks_by_chart():
+async def test_stage_dob_first_retypes_swallowed_keystroke_and_picks_by_chart(monkeypatch):
+    monkeypatch.delenv("S1_SERVER_API_KEY", raising=False)
     clicks: list[str] = []
-    search = _Search({"Shumsky, Elena": [ROW_A, ROW_B, ROW_KID]}, swallow_first=True)
+    search = _Search({"02/07/1980": [ROW_A, ROW_B]}, swallow_first=True)
     flow = _flow("2085", "chart number 2085; name: Shumsky, Elena; date of birth 02/07/1980", search, clicks)
     await st.stage_patient_found(flow)
-    assert search.typed[0] == "humsky, Elena" and search.typed[1] == "Shumsky, Elena"  # read-back caught it
+    assert search.typed[0] == "2/07/1980" and search.typed[1] == "02/07/1980"  # read-back caught the lost key
     assert clicks == [ROW_A]  # exact chart row, in code, no model
 
 
 @pytest.mark.asyncio
-async def test_stage_falls_back_to_dob_and_matches_name_in_code():
+async def test_stage_dob_rows_matched_by_exact_name_in_code(monkeypatch):
+    monkeypatch.delenv("S1_SERVER_API_KEY", raising=False)
     clicks: list[str] = []
-    search = _Search({"Shumsky, Elena": [], "02/07/1980": [ROW_A, "5 - VBMD\nOTHER, PERSON\n02/07/1980"]})
+    search = _Search({"02/07/1980": [ROW_A, "5 - VBMD\nOTHER, PERSON\n02/07/1980"]})
     flow = _flow("Shumsky, Elena", "name: Shumsky, Elena; date of birth 02/07/1980", search, clicks)
     await st.stage_patient_found(flow)
-    assert search.typed == ["Shumsky, Elena", "02/07/1980"]
+    assert search.typed == ["02/07/1980"]
     assert clicks == [ROW_A]
 
 
 @pytest.mark.asyncio
-async def test_stage_raises_ambiguous_only_when_name_and_dob_cannot_separate_rows():
+async def test_stage_dob_rows_with_spelling_variant_go_to_system_one_with_bounded_fanout(monkeypatch):
+    """Same birthday, name spelled differently: Winnow decides among ALL rows;
+    if it declines, only rows carrying the last name are click candidates."""
+    monkeypatch.delenv("S1_SERVER_API_KEY", raising=False)
     clicks: list[str] = []
-    search = _Search({"Shumsky, Elena": [ROW_A, ROW_B, ROW_KID]})
-    flow = _flow("Shumsky, Elena", "name: Shumsky, Elena", search, clicks)
+    rows = ["7 - VBMD\nSHUMSKI, ELENA\n02/07/1980", "8 - VBMD\nSHUMSKY, LENA\n02/07/1980",
+            "9 - VBMD\nSTRANGER, PAT\n02/07/1980"]
+    search = _Search({"02/07/1980": rows})
+    flow = _flow("Shumsky, Elena", "name: Shumsky, Elena; date of birth 02/07/1980", search, clicks)
     with pytest.raises(AmbiguousMatchError) as ei:
         await st.stage_patient_found(flow)
-    assert ei.value.candidates == [ROW_A, ROW_B, ROW_KID] and clicks == []
+    assert ei.value.candidates == rows                      # Winnow sees everyone with that dob
+    assert ei.value.fanout_candidates == [rows[1]]           # only the row carrying the last name is clickable
+    assert clicks == []
     # a prior System One pick is honoured in code
-    flow2 = _flow("Shumsky, Elena", "name: Shumsky, Elena", _Search({"Shumsky, Elena": [ROW_A, ROW_B, ROW_KID]}), clicks)
-    flow2.chosen_candidate = ROW_B
+    flow2 = _flow("Shumsky, Elena", "name: Shumsky, Elena; date of birth 02/07/1980", _Search({"02/07/1980": rows}), clicks)
+    flow2.chosen_candidate = rows[0]
     await st.stage_patient_found(flow2)
-    assert clicks == [ROW_B]
+    assert clicks == [rows[0]]
 
 
 @pytest.mark.asyncio
-async def test_stage_not_found_after_name_and_dob_both_empty():
+async def test_stage_empty_dob_search_falls_to_name_then_not_found(monkeypatch):
+    """No rows by dob: the next move (deterministic fallback without s1) is the
+    name; empty again -> not found. No model, no click."""
     from portal.flows._runner import PatientNotFoundError
 
+    monkeypatch.delenv("S1_SERVER_API_KEY", raising=False)
     clicks: list[str] = []
     search = _Search({})
     flow = _flow("Custidero, Louis", "name: Custidero, Louis; date of birth 01/01/1970", search, clicks)
     with pytest.raises(PatientNotFoundError):
         await st.stage_patient_found(flow)
-    assert search.typed == ["Custidero, Louis", "01/01/1970"] and clicks == []
+    assert search.typed == ["01/01/1970", "Custidero, Louis"] and clicks == []
+
+
+@pytest.mark.asyncio
+async def test_stage_winnow_can_order_a_retype_after_an_empty_search(monkeypatch):
+    """Winnow's move 'retype_dob' is honoured once, then the name search."""
+    from portal.graphs import search_decide as sd
+
+    moves = iter(["retype_dob", "search_name", "not_found"])
+
+    async def fake_move(**kw):
+        return next(moves), {"reason": "s1"}
+
+    monkeypatch.setattr(sd, "next_search_move", fake_move)
+    clicks: list[str] = []
+    search = _Search({"Custidero, Louis": [ "77 - VBMD\nCUSTIDERO, LOUIS\n01/01/1970"]})
+    flow = _flow("Custidero, Louis", "name: Custidero, Louis; date of birth 01/01/1970", search, clicks)
+    await st.stage_patient_found(flow)
+    assert search.typed == ["01/01/1970", "01/01/1970", "Custidero, Louis"]
+    assert clicks == ["77 - VBMD\nCUSTIDERO, LOUIS\n01/01/1970"]
 
 
 @pytest.mark.asyncio
 async def test_graph_reports_blocked_eligibility_without_clicking(monkeypatch):
-    """Details disabled (missing payer id): no click, no 30 s wait, reason reported."""
+    """Check Eligibility disabled (missing payer id): no click, reason reported."""
     _stub_downstream(monkeypatch)
 
     async def fake_disabled(ins):
         return True
 
-    async def never_open(app, ins):
-        raise AssertionError("must not click Details when it is disabled")
+    async def never_click(ins, **kw):
+        raise AssertionError("must not click Check Eligibility when it is disabled")
 
     async def fake_scrape(ins):
         return {"carrier_name": "x", "eligibility_status": "Missing Eligibility Payer ID"}
 
-    monkeypatch.setattr(ig, "details_disabled", fake_disabled)
-    monkeypatch.setattr(ig, "open_eligibility_frame", never_open)
+    monkeypatch.setattr(ig, "check_eligibility_disabled", fake_disabled)
+    monkeypatch.setattr(ig, "fire_check_eligibility_on_card", never_click)
     monkeypatch.setattr("portal.flows.insurance._scrape_fields", fake_scrape)
     monkeypatch.setattr(ig, "stage_patient_found", _noop)
 
@@ -387,3 +420,61 @@ async def test_graph_reports_blocked_eligibility_without_clicking(monkeypatch):
     assert data["eligibility_blocked"] is True
     assert data["eligibility_blocked_reason"] == "missing_payer_id"
     assert data["eligibility_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_graph_check_mode_clicks_card_control_and_never_opens_details(monkeypatch):
+    _stub_downstream(monkeypatch)
+    fired = {"n": 0}
+
+    async def not_disabled(ins):
+        return False
+
+    async def fake_fire(ins, **kw):
+        fired["n"] += 1
+        return {"fired": True, "grid_last_changed": True}
+
+    async def never_details(app, ins):
+        raise AssertionError("check_eligibility mode must not open Details")
+
+    monkeypatch.setattr(ig, "check_eligibility_disabled", not_disabled)
+    monkeypatch.setattr(ig, "fire_check_eligibility_on_card", fake_fire)
+    monkeypatch.setattr(ig, "open_eligibility_frame", never_details)
+    monkeypatch.setattr(ig, "stage_patient_found", _noop)
+
+    data = await ig.run_check_eligibility_graph(object(), "Test, Patient", checkpoints=Checkpoints(capture=False))
+    assert fired["n"] == 1
+    assert data["eligibility_click_fired"] is True and data["eligibility_grid_refreshed"] is True
+    assert not data.get("eligibility_blocked")
+
+
+@pytest.mark.asyncio
+async def test_next_search_move_offers_retype_and_untried_identifiers_only(monkeypatch):
+    from portal.graphs import search_decide as sd
+
+    class _S1(PortalSystemOne):
+        def __init__(self, pick):
+            super().__init__(api_key="sk-s1-test"); self.pick = pick; self.criteria = None
+        async def choice(self, *, state, instructions, criteria):
+            self.criteria = criteria
+            probs = {k: 0.0 for k in criteria}; probs[self.pick] = 0.9
+            return ChoiceAnswer(choice=self.pick, probabilities=probs)
+
+    available = {"dob": "02/07/1980", "name": "Shumsky, Elena", "chart": ""}
+    tried = [{"kind": "dob", "typed": "02/07/1980", "field_showed": "2/07/1980", "rows": 0}]
+    s1 = _S1("retype_dob")
+    move, d = await sd.next_search_move(available=available, tried=tried, s1=s1)
+    assert move == "retype_dob" and d["reason"] == "s1"
+    # only the last term can be retyped; only untried, known identifiers are offered; not_found always
+    assert set(s1.criteria) == {"retype_dob", "search_name", "not_found"}
+    # deterministic fallback without s1: dob -> name -> chart -> not_found
+    monkeypatch.delenv("S1_SERVER_API_KEY", raising=False)
+    move, d = await sd.next_search_move(available=available, tried=tried)
+    assert move == "search_name" and d["reason"] == "s1_not_configured"
+    tried2 = tried + [{"kind": "name", "typed": "Shumsky, Elena", "field_showed": "Shumsky, Elena", "rows": 0}]
+    move, _ = await sd.next_search_move(available=available, tried=tried2)
+    assert move == "not_found"
+    # hard cap on moves
+    monkeypatch.setattr(sd, "MAX_SEARCH_MOVES", 2)
+    move, d = await sd.next_search_move(available=available, tried=tried2, s1=_S1("retype_name"))
+    assert move == "not_found" and d["reason"] == "max_moves"

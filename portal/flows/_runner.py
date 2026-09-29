@@ -93,10 +93,15 @@ class AmbiguousMatchError(Exception):
         message: str = "search matched more than one result option",
         candidates: list[str] | None = None,
         s1: dict | None = None,
+        fanout_candidates: list[str] | None = None,
     ) -> None:
         super().__init__(message)
         self.candidates = list(candidates or [])
         self.s1 = dict(s1 or {})
+        # Rows worth a billable click if System One declines: for a
+        # date-of-birth search that is only the rows carrying the last name,
+        # never a stranger who shares the birthday.
+        self.fanout_candidates = list(fanout_candidates) if fanout_candidates is not None else list(self.candidates)
 
 
 class BlockingDialogError(Exception):

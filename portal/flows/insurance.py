@@ -95,7 +95,7 @@ async def _run_with_fanout(
             page, patient, insurance_index, checkpoints=checkpoints, **extra
         )
     except AmbiguousMatchError as exc:
-        cands = list(exc.candidates)
+        cands = list(getattr(exc, "fanout_candidates", None) or exc.candidates)
         if not _fanout_enabled() or len(cands) < 2 or len(cands) > _fanout_max():
             raise
         cp = checkpoints

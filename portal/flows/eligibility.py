@@ -63,6 +63,8 @@ _CHECK_ELIGIBILITY_SECTION = ".service-type-and-check-eligibility-section"
 ELIGIBILITY_FIELDS = [
     "eligibility_blocked",       # bool: AMD cannot run eligibility on this plan (Details disabled)
     "eligibility_blocked_reason",  # closed: missing_payer_id | invalid_subscriber | not_eligible_plan | other
+    "eligibility_click_fired",   # bool: check_eligibility mode clicked the card control
+    "eligibility_grid_refreshed",  # bool: the card's Last-checked cell changed after the click
     "eligibility_available",     # bool: a carrier response is on file
     "eligibility_no_data",       # bool: "No Data Received From Carrier"
     "eligibility_plan_status",   # e.g. Active / Inactive coverage
@@ -96,6 +98,8 @@ async def _empty_eligibility(available: bool, no_data: bool) -> dict:
     d["eligibility_no_data"] = no_data
     d["eligibility_blocked"] = False
     d["eligibility_blocked_reason"] = ""
+    d["eligibility_click_fired"] = False
+    d["eligibility_grid_refreshed"] = False
     d["eligibility_service_types"] = []
     return d
 
@@ -282,6 +286,81 @@ async def details_disabled(ins) -> bool:
         return aria == "true" or "disabled" in cls.split()
     except Exception:
         return False
+
+
+async def _card_control(ins, label: str):
+    btn = ins.get_by_role("button", name=label)
+    if await btn.count() == 0:
+        btn = ins.get_by_text(label, exact=True)
+    return btn
+
+
+async def _control_disabled(loc) -> bool:
+    try:
+        if await loc.count() == 0:
+            return False
+        first = loc.first
+        if await first.is_disabled():
+            return True
+        aria = await first.get_attribute("aria-disabled")
+        cls = (await first.get_attribute("class")) or ""
+        return aria == "true" or "disabled" in cls.split()
+    except Exception:
+        return False
+
+
+async def check_eligibility_disabled(ins) -> bool:
+    """True when the card renders Check Eligibility as a disabled control."""
+    return await _control_disabled(await _card_control(ins, _CHECK_ELIGIBILITY_LABEL))
+
+
+async def fire_check_eligibility_on_card(ins, *, grid_last_selector: str | None = None,
+                                         settle_s: int = 20) -> dict:
+    """Click Check Eligibility directly on the insurance card (owner
+    2026-09-29: no need to open Details first). Green is confirmed by the
+    caller from the stored record, so this only fires the inquiry, accepts a
+    plain confirmation dialog if one appears (OK / Yes, never Save), and
+    waits briefly for the grid's Last-checked cell to change.
+    """
+    btn = await _card_control(ins, _CHECK_ELIGIBILITY_LABEL)
+    await btn.first.wait_for(state="visible", timeout=15000)
+    before = ""
+    if grid_last_selector:
+        try:
+            before = (await ins.locator(grid_last_selector).first.inner_text()).strip()
+        except Exception:
+            before = ""
+    await btn.first.click(timeout=15000)
+    log.info("flow=eligibility clicked Check Eligibility on the card (billable)")
+    # A confirmation dialog, if any: accept only OK / Yes.
+    page = getattr(ins, "page", None)
+    for _ in range(_ticks(3)):
+        try:
+            for root in ([page] if page is not None else []) + [ins]:
+                for label in ("OK", "Yes"):
+                    ok = root.get_by_role("button", name=label)
+                    if await ok.count() and await ok.first.is_visible():
+                        await ok.first.click(timeout=3000)
+                        log.info("flow=eligibility confirmed dialog label=%s", label)
+                        raise StopAsyncIteration
+        except StopAsyncIteration:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(_POLL_S)
+    changed = False
+    if grid_last_selector:
+        for _ in range(_ticks(settle_s)):
+            try:
+                now = (await ins.locator(grid_last_selector).first.inner_text()).strip()
+                if now and now != before:
+                    changed = True
+                    break
+            except Exception:
+                pass
+            await asyncio.sleep(_POLL_S)
+    log.info("flow=eligibility card click fired grid_last_changed=%s", changed)
+    return {"fired": True, "grid_last_changed": changed}
 
 
 async def open_eligibility_frame(app, ins):
