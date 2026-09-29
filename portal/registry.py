@@ -54,9 +54,11 @@ PORTAL_REGISTRY: dict[str, PortalToolEntry] = {
     "check_eligibility": PortalToolEntry(
         name="check_eligibility",
         description=(
-            "Owner-gated billable write: open the insurance card Details "
-            "panel and click Check Eligibility, then scrape the fresh 271 "
-            "whitelist. Requires AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 and "
+            "Owner-gated billable write: open Patient Info > Insurance, "
+            "select the coverage row, click the card's Check Eligibility. "
+            "Idempotent within a day (skips when Last Checked is today). "
+            "Green is confirmed by the caller from the stored record. "
+            "Requires AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 and "
             "args.confirm=true. Appointment-validator uses this when stored "
             "AMD eligibility is stale/not-green."
         ),

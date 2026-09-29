@@ -62,6 +62,8 @@ _CHECK_ELIGIBILITY_SECTION = ".service-type-and-check-eligibility-section"
 # the rest are best-effort text reads that stay empty when absent.
 ELIGIBILITY_FIELDS = [
     "eligibility_outcome",       # closed: active | inactive | unverifiable | blocked (portal's verdict)
+    "eligibility_click_skipped",  # bool: idempotent no-op, the row was already checked today
+    "eligibility_last_checked_card",  # the selected row's Last Checked date as shown on the card
     "eligibility_blocked",       # bool: AMD cannot run eligibility on this plan (Details disabled)
     "eligibility_blocked_reason",  # closed: missing_payer_id | invalid_subscriber | not_eligible_plan | other
     "eligibility_click_fired",   # bool: check_eligibility mode clicked the card control
@@ -101,9 +103,35 @@ async def _empty_eligibility(available: bool, no_data: bool) -> dict:
     d["eligibility_blocked_reason"] = ""
     d["eligibility_click_fired"] = False
     d["eligibility_grid_refreshed"] = False
+    d["eligibility_click_skipped"] = False
+    d["eligibility_last_checked_card"] = ""
     d["eligibility_service_types"] = []
     d["eligibility_outcome"] = "unverifiable"
     return d
+
+
+async def selected_row_last_checked(ins) -> str:
+    """The selected coverage row's Last Checked cell (mm/dd/yyyy) or ''."""
+    try:
+        loc = ins.locator("#tblInsCoverages tr[data-selected='1'] td:nth-child(7)")
+        if await loc.count():
+            return (await loc.first.inner_text()).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def checked_today(last_checked: str, today=None) -> bool:
+    """True when the card's Last Checked date is today's date (AMD shows the
+    date only). Makes check_eligibility idempotent within a day: a second
+    call does not fire a second billable inquiry."""
+    import datetime as _dt
+
+    today = today or _dt.date.today()
+    try:
+        return _dt.datetime.strptime((last_checked or "").strip(), "%m/%d/%Y").date() == today
+    except ValueError:
+        return False
 
 
 _ACTIVE_WORDS = ("active", "eligible", "covered")

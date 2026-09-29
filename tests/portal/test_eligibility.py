@@ -176,6 +176,8 @@ def test_panel_never_attaches_returns_unavailable(monkeypatch):
 def test_eligibility_fields_whitelist_is_fixed():
     assert eligibility.ELIGIBILITY_FIELDS == [
         "eligibility_outcome",
+        "eligibility_click_skipped",
+        "eligibility_last_checked_card",
         "eligibility_blocked",
         "eligibility_blocked_reason",
         "eligibility_click_fired",
@@ -227,3 +229,12 @@ def test_model_urls_must_be_local(monkeypatch):
     monkeypatch.setenv("PORTAL_LLM_BASE_URL", "https://api.openai.com/v1")
     with _pt.raises(HostedModelForbidden):
         OllamaRecoveryLLM()
+
+
+def test_checked_today_is_date_only_and_tolerant():
+    import datetime as dt
+    today = dt.date(2026, 9, 29)
+    assert eligibility.checked_today("09/29/2026", today) is True
+    assert eligibility.checked_today("09/28/2026", today) is False
+    assert eligibility.checked_today("", today) is False
+    assert eligibility.checked_today("not a date", today) is False

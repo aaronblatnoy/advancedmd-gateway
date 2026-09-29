@@ -82,9 +82,17 @@ Navigation chain: [insurance-flow.md](insurance-flow.md)
 
 ## check_eligibility (owner-gated write)
 
-Fire AMD **Check Eligibility** (billable 271 inquiry) then scrape the fresh
-panel. Same navigation as `get_insurance_details`, but after Details opens
-it clicks Check Eligibility inside `frmEligibilityDetails`.
+Fire AMD **Check Eligibility** (billable 271 inquiry). Same navigation as
+`get_insurance_details` up to the insurance card, then (observed live
+2026-09-29): select the coverage row `#tblInsCoverages tr[id^=ins]` for
+`insurance_index` (it shows `data-selected="1"`), click the card's
+`#btnEligibilityOnDemand`. Clicking with no row selected does nothing.
+AMD answers asynchronously; callers confirm green from the stored record
+(`getdemographic`: `eligibilitystatusid == 1` and an advanced
+`eligibilityresponsedate`). **Idempotent within a day:** if the row's Last
+Checked already shows today the click is skipped and
+`eligibility_click_skipped=true` is returned (`PORTAL_CHECK_ELIGIBILITY_FORCE=1`
+overrides). `PORTAL_CHECK_VIA_CARD=0` falls back to the Details-panel click.
 
 Accepts the same `patient_hint` and applies the same duplicate rule as
 `get_insurance_details` (each candidate row gets its own billable click, so

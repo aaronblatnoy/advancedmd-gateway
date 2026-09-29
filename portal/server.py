@@ -150,14 +150,24 @@ async def check_eligibility(
     confirm: bool = False,
     patient_hint: str = "",
 ) -> str:
-    """Fire AMD portal Check Eligibility (billable) then scrape the fresh 271.
+    """Fire AMD portal Check Eligibility (billable) for one coverage.
 
     Owner-gated write. Requires the sidecar env
-    AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 and confirm=true. Opens the same
-    insurance card path as get_insurance_details, clicks Check Eligibility
-    inside frmEligibilityDetails, waits for the carrier response, and
-    returns the same eligibility_* whitelist. Never clicks Save / Submit /
-    Bypass. Returns JSON {"ok": true, "data": {...}} or {"ok": false, ...}.
+    AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 and confirm=true. Scripted, no
+    model: finds the patient (date of birth first, then name; chart number
+    picks the row in code; System One only for a residual duplicate), opens
+    Patient Info > Insurance, SELECTS the coverage row (insurance_index,
+    1 = primary), then clicks the card's Check Eligibility button. AMD
+    answers asynchronously: confirm green from the stored record
+    (getdemographic eligibilitystatusid == 1 with an advanced
+    eligibilityresponsedate), not from this reply.
+    Idempotent within a day: if the row's Last Checked already shows today
+    the click is skipped and eligibility_click_skipped=true is returned
+    (PORTAL_CHECK_ELIGIBILITY_FORCE=1 overrides). A plan whose controls AMD
+    disables (missing payer ID, invalid subscriber) is reported as
+    eligibility_blocked with a reason and never clicked. Never clicks Save /
+    Submit / Bypass. Returns JSON {"ok": true, "data": {...}} or
+    {"ok": false, ...}.
     """
     import os
 

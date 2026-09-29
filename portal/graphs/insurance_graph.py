@@ -21,7 +21,10 @@ from portal.flows._runner import Checkpoints
 from portal.flows.eligibility import (
     ELIGIBILITY_FIELDS,
     blocked_eligibility,
+    checked_today,
     closed_outcome,
+    select_coverage_row,
+    selected_row_last_checked,
     check_eligibility_disabled,
     close_eligibility_panel,
     details_disabled,
@@ -173,6 +176,21 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
                 stage = "eligibility_check_fired"
                 from portal.flows.insurance import _ROW
 
+                # Idempotent: select the row first and read its Last Checked.
+                # Already checked today -> no second billable click.
+                await select_coverage_row(flow.ins, flow.insurance_index)
+                last = await selected_row_last_checked(flow.ins)
+                if checked_today(last) and os.environ.get("PORTAL_CHECK_ELIGIBILITY_FORCE", "0") != "1":
+                    elig = await read_eligibility_from_frame(None)
+                    elig["eligibility_click_skipped"] = True
+                    elig["eligibility_last_checked_card"] = last
+                    elig["eligibility_outcome"] = "unverifiable"  # caller confirms from the stored record
+                    flow.checkpoints.note("check eligibility skipped: row already checked today (idempotent)")
+                    log.info("insurance_graph check skipped: already checked today")
+                    data = dict(state.get("data") or {})
+                    data.update(elig)
+                    return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
+
                 async with flow.checkpoints.stage("eligibility_check_fired", flow.app):
                     fired = await fire_check_eligibility_on_card(
                         flow.ins, insurance_index=flow.insurance_index,
@@ -190,6 +208,7 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
                 elig = await read_eligibility_from_frame(None)
                 elig["eligibility_click_fired"] = bool(fired.get("fired"))
                 elig["eligibility_grid_refreshed"] = bool(fired.get("grid_last_changed"))
+                elig["eligibility_last_checked_card"] = await selected_row_last_checked(flow.ins)
                 elig["eligibility_outcome"] = "unverifiable"
                 data = dict(state.get("data") or {})
                 data.update(elig)

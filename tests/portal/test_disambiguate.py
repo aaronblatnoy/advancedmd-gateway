@@ -438,7 +438,16 @@ async def test_graph_check_mode_clicks_card_control_and_never_opens_details(monk
     async def never_details(app, ins):
         raise AssertionError("check_eligibility mode must not open Details")
 
+    async def fake_select(ins, idx):
+        return True
+
+    async def old_last(ins):
+        return "09/27/2026"
+
     monkeypatch.setattr(ig, "check_eligibility_disabled", not_disabled)
+    monkeypatch.setattr(ig, "details_disabled", not_disabled)
+    monkeypatch.setattr(ig, "select_coverage_row", fake_select)
+    monkeypatch.setattr(ig, "selected_row_last_checked", old_last)
     monkeypatch.setattr(ig, "fire_check_eligibility_on_card", fake_fire)
     monkeypatch.setattr(ig, "open_eligibility_frame", never_details)
     monkeypatch.setattr(ig, "stage_patient_found", _noop)
@@ -521,3 +530,40 @@ async def test_graph_check_mode_fallback_uses_details_panel_click(monkeypatch):
     data = await ig.run_check_eligibility_graph(object(), "Test, Patient", checkpoints=Checkpoints(capture=False))
     assert seen == {"details": 1, "fired": 1, "closed": 1, "card": 0}
     assert data["eligibility_click_fired"] is True and data["eligibility_outcome"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_graph_check_mode_is_idempotent_within_a_day(monkeypatch):
+    """Row already checked today: select the row, read Last Checked, click nothing."""
+    monkeypatch.delenv("PORTAL_CHECK_VIA_CARD", raising=False)
+    monkeypatch.delenv("PORTAL_CHECK_ELIGIBILITY_FORCE", raising=False)
+    _stub_downstream(monkeypatch)
+    import datetime as dt
+    today = dt.date.today().strftime("%m/%d/%Y")
+    calls = {"select": 0, "fire": 0}
+
+    async def not_disabled(ins):
+        return False
+
+    async def fake_select(ins, idx):
+        calls["select"] += 1
+        return True
+
+    async def fake_last(ins):
+        return today
+
+    async def never_fire(ins, **kw):
+        calls["fire"] += 1
+        raise AssertionError("must not click when already checked today")
+
+    monkeypatch.setattr(ig, "check_eligibility_disabled", not_disabled)
+    monkeypatch.setattr(ig, "details_disabled", not_disabled)
+    monkeypatch.setattr(ig, "select_coverage_row", fake_select)
+    monkeypatch.setattr(ig, "selected_row_last_checked", fake_last)
+    monkeypatch.setattr(ig, "fire_check_eligibility_on_card", never_fire)
+    monkeypatch.setattr(ig, "stage_patient_found", _noop)
+
+    data = await ig.run_check_eligibility_graph(object(), "Test, Patient", checkpoints=Checkpoints(capture=False))
+    assert calls == {"select": 1, "fire": 0}
+    assert data["eligibility_click_skipped"] is True and data["eligibility_last_checked_card"] == today
+    assert not data.get("eligibility_click_fired")
