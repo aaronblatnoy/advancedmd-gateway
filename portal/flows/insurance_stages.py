@@ -95,6 +95,7 @@ async def stage_session_and_scheduler(state: InsuranceFlowState) -> None:
 
 _CHART_HINT_RE = re.compile(r"chart(?:\s*number)?\s*[:=#]?\s*(\d{2,})", re.I)
 _NAME_HINT_RE = re.compile(r"name\s*[:=]\s*\"?([^;\"\n]+?)\"?\s*(?:;|$)", re.I)
+_DOB_HINT_RE = re.compile(r"date of birth\s*[:=]?\s*(\d{2}/\d{2}/\d{4})", re.I)
 
 
 def chart_from_hint(hint: str) -> str:
@@ -107,22 +108,90 @@ def name_from_hint(hint: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def dob_from_hint(hint: str) -> str:
+    m = _DOB_HINT_RE.search(hint or "")
+    return m.group(1) if m else ""
+
+
 def _row_chart(text: str) -> str:
     """Leading chart number of a scheduler row ('2085 - VBMD ...' -> '2085')."""
     m = re.match(r"\s*(\d+)\s*-", text or "")
     return m.group(1) if m else ""
 
 
-async def stage_patient_found(state: InsuranceFlowState) -> None:
-    """Find and click the patient's scheduler row. Scripted first, model last.
+def _norm(s: str) -> str:
+    return " ".join((s or "").upper().replace(",", ", ").split())
 
-    Order of decision (owner 2026-09-28: script whatever can be scripted):
-    1. Known chart number (digit query or ``chart number N`` in the hint):
-       search by NAME when one is in the hint (AMD's search returns no rows
-       for some chart numbers), otherwise by the digits; then pick the row
-       whose leading chart number equals ours, in code.
-    2. No chart known, several rows: raise AmbiguousMatchError with the row
-       texts; the graph asks System One, then fans out if it declines.
+
+def last_first(name: str) -> str:
+    """'First Middle Last' or 'Last, First Middle' -> 'Last, First' (no middle)."""
+    name = " ".join((name or "").split())
+    if not name:
+        return ""
+    if "," in name:
+        last, _, rest = name.partition(",")
+        first = rest.split()[0] if rest.split() else ""
+        return f"{last.strip()}, {first}".rstrip(", ")
+    parts = name.split()
+    return f"{parts[-1]}, {parts[0]}" if len(parts) >= 2 else name
+
+
+def row_matches_name(row_text: str, name: str) -> bool:
+    """Deterministic: the row carries 'LAST, FIRST' (first token) of ``name``."""
+    want = _norm(last_first(name))
+    if not want:
+        return False
+    return want in _norm(row_text)
+
+
+def search_terms(patient: str, hint: str) -> list[tuple[str, str]]:
+    """Ordered (kind, text) search attempts. Name first as 'Last, First',
+    then date of birth, then the raw digits when nothing else is known."""
+    chart = patient if patient.strip().isdigit() else chart_from_hint(hint)
+    name = name_from_hint(hint) or ("" if patient.strip().isdigit() else patient)
+    dob = dob_from_hint(hint)
+    terms: list[tuple[str, str]] = []
+    if name:
+        terms.append(("name", last_first(name)))
+    if dob:
+        terms.append(("dob", dob))
+    if chart and not terms:
+        terms.append(("chart", chart))
+    return terms
+
+
+async def _type_and_verify(search, text: str, attempts: int = 3) -> None:
+    """Type into the scheduler search box and read it back. AMD's combobox
+    can swallow the first keystroke while it attaches (live 2026-09-29:
+    'LOUIS ...' arrived as 'OUIS ...' and found nothing)."""
+    for attempt in range(attempts):
+        try:
+            await search.fill("")
+        except Exception:
+            pass
+        try:
+            await search.click()
+        except Exception:
+            pass
+        await search.press_sequentially(text, delay=20)
+        try:
+            typed = (await search.input_value()).strip()
+        except Exception:
+            typed = text
+        if typed == text:
+            return
+        log.info("flow=insurance search text mismatch; retyping (attempt %s)", attempt + 1)
+    log.warning("flow=insurance search text still mismatched after %s attempts", attempts)
+
+
+async def stage_patient_found(state: InsuranceFlowState) -> None:
+    """Find and click the patient's scheduler row. Deterministic; System One
+    only for a residual ambiguity.
+
+    Owner rules (2026-09-29): search 'Last, First'; if empty search by date
+    of birth; match the name in code; if several rows still fit, let Winnow
+    decide (the graph asks it, then fans out if it declines). A known chart
+    number always picks its row in code.
     """
     app = state.app
     sched = state.sched
@@ -130,75 +199,69 @@ async def stage_patient_found(state: InsuranceFlowState) -> None:
     patient = state.patient.strip()
     hint = state.patient_hint or ""
     cp = state.checkpoints
-
     chart = patient if patient.isdigit() else chart_from_hint(hint)
-    name = name_from_hint(hint)
-    # Search text: prefer the name when the chart is known and a name exists.
-    search_text = name if (chart and name) else patient
-    if search_text != patient:
-        log.info("flow=insurance searching by name (chart known from hint)")
+    name = name_from_hint(hint) or ("" if patient.isdigit() else patient)
+    terms = search_terms(patient, hint)
 
     async with cp.stage("patient_found", app):
-        try:
-            await search.fill("")
-        except Exception:
-            pass
-        await search.press_sequentially(search_text, delay=10)
-        log.info("flow=insurance patient search submitted")
-        options = sched.get_by_role("option")
-        if search_text.isdigit():
-            result = options.filter(
-                has_text=re.compile(rf"\b{re.escape(search_text)}\s*-")
-            )
-        else:
-            result = options.filter(
-                has_text=re.compile(re.escape(search_text), re.I)
-            )
-        try:
-            await result.first.wait_for(state="visible", timeout=15000)
-        except Exception as exc:
-            if type(exc).__name__ == "TimeoutError":
-                raise PatientNotFoundError(
-                    "no search result matched the query"
-                ) from None
-            raise
-        n = await result.count()
-        texts = [t.strip() for t in await result.all_inner_texts()]
+        if not terms:
+            raise PatientNotFoundError("no searchable key (no name, dob or chart)")
+        for kind, text in terms:
+            await _type_and_verify(search, text)
+            log.info("flow=insurance patient search submitted by=%s", kind)
+            options = sched.get_by_role("option")
+            if kind == "chart":
+                result = options.filter(has_text=re.compile(rf"\b{re.escape(text)}\s*-"))
+            elif kind == "name":
+                result = options.filter(has_text=re.compile(re.escape(text), re.I))
+            else:
+                result = options  # dob search: every row shown shares the dob
+            try:
+                await result.first.wait_for(state="visible", timeout=10000)
+            except Exception as exc:
+                if type(exc).__name__ != "TimeoutError":
+                    raise
+                log.info("flow=insurance no rows by=%s", kind)
+                continue
+            n = await result.count()
+            texts = [t.strip() for t in await result.all_inner_texts()]
 
-        if chart:
-            # Deterministic pick: the row that starts with our chart number.
-            matches = [i for i, t in enumerate(texts) if _row_chart(t) == chart]
-            if len(matches) == 1:
-                await result.nth(matches[0]).click()
-                log.info(
-                    "flow=insurance patient selected by chart rows=%s pick=%s",
-                    n, matches[0],
-                )
+            if chart:
+                matches = [i for i, t in enumerate(texts) if _row_chart(t) == chart]
+                if len(matches) == 1:
+                    await result.nth(matches[0]).click()
+                    log.info("flow=insurance patient selected by chart by=%s rows=%s", kind, n)
+                    return
+                if not matches:
+                    log.info("flow=insurance rows=%s by=%s carry no matching chart", n, kind)
+                    continue
+
+            if name:
+                named = [i for i, t in enumerate(texts) if row_matches_name(t, name)]
+                if len(named) == 1:
+                    await result.nth(named[0]).click()
+                    log.info("flow=insurance patient selected by name match by=%s rows=%s", kind, n)
+                    return
+                if not named:
+                    log.info("flow=insurance rows=%s by=%s but none match the name", n, kind)
+                    continue
+                texts = [texts[i] for i in named]
+                result_idx = named
+            else:
+                result_idx = list(range(n))
+
+            if len(result_idx) == 1:
+                await result.nth(result_idx[0]).click()
+                log.info("flow=insurance patient selected (single row) by=%s", kind)
                 return
-            if not matches:
-                log.info(
-                    "flow=insurance rows=%s but none carry the known chart", n
-                )
-                raise PatientNotFoundError(
-                    "no search result carries the requested chart number"
-                )
-            # Two rows with the same chart number cannot happen in AMD; if
-            # the text ever does that, fall through to the ambiguity path.
-
-        if n > 1:
             chosen = state.chosen_candidate
             if chosen and chosen in texts:
-                idx = texts.index(chosen)
-                await result.nth(idx).click()
-                log.info(
-                    "flow=insurance patient selected via system_one "
-                    "candidates=%s pick=%s", n, idx
-                )
+                await result.nth(result_idx[texts.index(chosen)]).click()
+                log.info("flow=insurance patient selected via system_one candidates=%s", len(texts))
                 return
-            log.info("flow=insurance patient search ambiguous candidates=%s", n)
+            log.info("flow=insurance patient search ambiguous candidates=%s by=%s", len(texts), kind)
             raise AmbiguousMatchError(candidates=texts)
-        await result.first.click()
-        log.info("flow=insurance patient selected")
+        raise PatientNotFoundError("no search result matched the query")
 
 
 async def stage_patient_info_open(state: InsuranceFlowState) -> None:

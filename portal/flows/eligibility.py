@@ -61,6 +61,8 @@ _CHECK_ELIGIBILITY_SECTION = ".service-type-and-check-eligibility-section"
 # exposes. ``eligibility_available`` is the deterministic presence flag;
 # the rest are best-effort text reads that stay empty when absent.
 ELIGIBILITY_FIELDS = [
+    "eligibility_blocked",       # bool: AMD cannot run eligibility on this plan (Details disabled)
+    "eligibility_blocked_reason",  # closed: missing_payer_id | invalid_subscriber | not_eligible_plan | other
     "eligibility_available",     # bool: a carrier response is on file
     "eligibility_no_data",       # bool: "No Data Received From Carrier"
     "eligibility_plan_status",   # e.g. Active / Inactive coverage
@@ -92,7 +94,17 @@ async def _empty_eligibility(available: bool, no_data: bool) -> dict:
     d = {f: "" for f in ELIGIBILITY_FIELDS}
     d["eligibility_available"] = available
     d["eligibility_no_data"] = no_data
+    d["eligibility_blocked"] = False
+    d["eligibility_blocked_reason"] = ""
     d["eligibility_service_types"] = []
+    return d
+
+
+async def blocked_eligibility(comment: str) -> dict:
+    """The record for a plan AMD refuses to check (Details disabled)."""
+    d = await _empty_eligibility(available=False, no_data=False)
+    d["eligibility_blocked"] = True
+    d["eligibility_blocked_reason"] = classify_blocked_reason(comment)
     return d
 
 
@@ -229,6 +241,47 @@ async def _read_service_types(frame) -> list:
         return names
     except Exception:
         return []
+
+
+_BLOCKED_REASONS = (
+    ("missing eligibility payer", "missing_payer_id"),
+    ("payer id", "missing_payer_id"),
+    ("invalid/missing subscr", "invalid_subscriber"),
+    ("invalid subscriber", "invalid_subscriber"),
+    ("missing subscriber", "invalid_subscriber"),
+    ("not eligible", "not_eligible_plan"),
+)
+
+
+def classify_blocked_reason(comment: str) -> str:
+    """Closed reason for a plan whose Details/Check controls are disabled,
+    from the grid's eligibility comment (PHI-free status text)."""
+    low = (comment or "").lower()
+    for needle, reason in _BLOCKED_REASONS:
+        if needle in low:
+            return reason
+    return "other"
+
+
+async def details_disabled(ins) -> bool:
+    """True when the legacy card renders Details as a disabled control.
+
+    Live 2026-09-29: plans flagged 'Missing Eligibility Payer ID' or
+    'INVALID/MISSING SUBSCRIBER' show Details greyed out; clicking waits
+    30 s for nothing. That is an insurance-setup gap, not a portal fault.
+    """
+    try:
+        btn = ins.get_by_role("button", name="Details")
+        if await btn.count() == 0:
+            return False
+        first = btn.first
+        if await first.is_disabled():
+            return True
+        aria = await first.get_attribute("aria-disabled")
+        cls = (await first.get_attribute("class")) or ""
+        return aria == "true" or "disabled" in cls.split()
+    except Exception:
+        return False
 
 
 async def open_eligibility_frame(app, ins):

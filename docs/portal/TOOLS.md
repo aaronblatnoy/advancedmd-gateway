@@ -63,7 +63,10 @@ all claims value fields are empty, and `claims_address_reason` is one of
 `carrier_detail_not_opened`, `element_not_found`, or
 `selectors_not_verified`. On success the reason is an empty string.
 
-271 Details (prefix `eligibility_`): `eligibility_available`,
+271 Details (prefix `eligibility_`): `eligibility_blocked` (AMD renders
+Details disabled: the plan cannot be checked), `eligibility_blocked_reason`
+(`missing_payer_id` | `invalid_subscriber` | `not_eligible_plan` | `other`,
+from the grid's eligibility comment), `eligibility_available`,
 `eligibility_no_data`, `eligibility_plan_status`, `eligibility_plan_name`,
 `eligibility_group`, `eligibility_coverage_dates`, `eligibility_copay`,
 `eligibility_coinsurance`, `eligibility_deductible`, `eligibility_out_of_pocket`,

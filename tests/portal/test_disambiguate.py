@@ -203,82 +203,187 @@ async def test_flow_fanout_respects_cap_and_kill_switch(monkeypatch):
         await insurance.get_insurance_details(object(), "x")
 
 
+# ---------------------------------------------------------------------------
+# Deterministic patient search (stage level, fake Playwright locators)
+# ---------------------------------------------------------------------------
+from portal.flows import insurance_stages as st  # noqa: E402
+
+
+class _Loc:
+    """Minimal async stand-in for a Playwright locator over option rows."""
+
+    def __init__(self, rows: list[str], clicks: list[str]):
+        self._rows, self._clicks = rows, clicks
+
+    def filter(self, has_text=None):
+        return _Loc([r for r in self._rows if has_text is None or has_text.search(r)], self._clicks)
+
+    @property
+    def first(self):
+        return self
+
+    async def wait_for(self, state="visible", timeout=0):
+        if not self._rows:
+            raise _Timeout("no rows")
+
+    async def count(self):
+        return len(self._rows)
+
+    async def all_inner_texts(self):
+        return list(self._rows)
+
+    def nth(self, i):
+        loc = _Loc([self._rows[i]], self._clicks)
+        return loc
+
+    async def click(self, timeout=None):
+        self._clicks.append(self._rows[0])
+
+
+class _Timeout(Exception):
+    pass
+
+
+_Timeout.__name__ = "TimeoutError"
+
+
+class _Search:
+    """Search box whose results depend on the typed text; swallows the first
+    keystroke once to exercise the read-back retry."""
+
+    def __init__(self, results_by_text: dict[str, list[str]], swallow_first=False):
+        self.results_by_text, self.typed, self.value = results_by_text, [], ""
+        self._swallow = swallow_first
+
+    async def fill(self, v):
+        self.value = v
+
+    async def click(self):
+        pass
+
+    async def press_sequentially(self, text, delay=0):
+        if self._swallow:
+            self._swallow = False
+            self.value = text[1:]
+        else:
+            self.value = text
+        self.typed.append(self.value)
+
+    async def input_value(self):
+        return self.value
+
+
+class _Sched:
+    def __init__(self, search: _Search, clicks: list[str]):
+        self._search, self._clicks = search, clicks
+
+    def get_by_role(self, role, name=None):
+        rows = self._search.results_by_text.get(self._search.value, [])
+        return _Loc(rows, self._clicks)
+
+
+class _CP:
+    def stage(self, name, app):
+        import contextlib
+
+        @contextlib.asynccontextmanager
+        async def _cm():
+            yield
+        return _cm()
+
+    def note(self, *_a, **_k):
+        pass
+
+
+def _flow(patient, hint, search: _Search, clicks):
+    return InsuranceFlowState(page=None, patient=patient, insurance_index=1, checkpoints=_CP(),
+                              app=object(), sched=_Sched(search, clicks), search=search,
+                              patient_hint=hint)
+
+
+ROW_A = "2085 - VBMD\nSHUMSKY, ELENA\n02/07/1980"
+ROW_B = "10037657 - VBMD\nSHUMSKY, ELENA\n02/07/1980"
+ROW_KID = "10031229 - VBMD\nSHUMSKY, ELENA\n08/12/2009"
+
+
+def test_search_terms_order_and_normalisation():
+    assert st.search_terms("2085", "chart number 2085; name: Elena Marie Shumsky; date of birth 02/07/1980") == [
+        ("name", "Shumsky, Elena"), ("dob", "02/07/1980")]
+    assert st.search_terms("2085", "") == [("chart", "2085")]
+    assert st.search_terms("Shumsky, Elena", "date of birth 02/07/1980") == [
+        ("name", "Shumsky, Elena"), ("dob", "02/07/1980")]
+    assert st.last_first("SHUMSKY, ELENA MARIE") == "SHUMSKY, ELENA"
+    assert st.row_matches_name(ROW_A, "Elena Marie Shumsky") is True
+    assert st.row_matches_name(ROW_A, "Custidero, Louis") is False
+
+
 @pytest.mark.asyncio
-async def test_graph_retries_by_name_when_chart_search_is_empty(monkeypatch):
+async def test_stage_retypes_when_first_keystroke_is_swallowed_and_picks_by_chart():
+    clicks: list[str] = []
+    search = _Search({"Shumsky, Elena": [ROW_A, ROW_B, ROW_KID]}, swallow_first=True)
+    flow = _flow("2085", "chart number 2085; name: Shumsky, Elena; date of birth 02/07/1980", search, clicks)
+    await st.stage_patient_found(flow)
+    assert search.typed[0] == "humsky, Elena" and search.typed[1] == "Shumsky, Elena"  # read-back caught it
+    assert clicks == [ROW_A]  # exact chart row, in code, no model
+
+
+@pytest.mark.asyncio
+async def test_stage_falls_back_to_dob_and_matches_name_in_code():
+    clicks: list[str] = []
+    search = _Search({"Shumsky, Elena": [], "02/07/1980": [ROW_A, "5 - VBMD\nOTHER, PERSON\n02/07/1980"]})
+    flow = _flow("Shumsky, Elena", "name: Shumsky, Elena; date of birth 02/07/1980", search, clicks)
+    await st.stage_patient_found(flow)
+    assert search.typed == ["Shumsky, Elena", "02/07/1980"]
+    assert clicks == [ROW_A]
+
+
+@pytest.mark.asyncio
+async def test_stage_raises_ambiguous_only_when_name_and_dob_cannot_separate_rows():
+    clicks: list[str] = []
+    search = _Search({"Shumsky, Elena": [ROW_A, ROW_B, ROW_KID]})
+    flow = _flow("Shumsky, Elena", "name: Shumsky, Elena", search, clicks)
+    with pytest.raises(AmbiguousMatchError) as ei:
+        await st.stage_patient_found(flow)
+    assert ei.value.candidates == [ROW_A, ROW_B, ROW_KID] and clicks == []
+    # a prior System One pick is honoured in code
+    flow2 = _flow("Shumsky, Elena", "name: Shumsky, Elena", _Search({"Shumsky, Elena": [ROW_A, ROW_B, ROW_KID]}), clicks)
+    flow2.chosen_candidate = ROW_B
+    await st.stage_patient_found(flow2)
+    assert clicks == [ROW_B]
+
+
+@pytest.mark.asyncio
+async def test_stage_not_found_after_name_and_dob_both_empty():
     from portal.flows._runner import PatientNotFoundError
 
-    _stub_downstream(monkeypatch)
-    searched: list[str] = []
-    resets = {"n": 0}
-
-    async def fake_scheduler(flow):
-        resets["n"] += 1
-
-    async def fake_patient_found(flow: InsuranceFlowState):
-        searched.append(flow.patient)
-        if flow.patient.isdigit():
-            raise PatientNotFoundError("no search result matched the query")
-
-    monkeypatch.setattr(ig, "stage_session_and_scheduler", fake_scheduler)
-    monkeypatch.setattr(ig, "stage_patient_found", fake_patient_found)
-
-    data = await ig.run_get_insurance_details_graph(
-        object(), "2085", checkpoints=Checkpoints(capture=False),
-        patient_hint="chart number 2085; name: Shumsky, Elena; date of birth 02/07/1980",
-    )
-    assert searched == ["2085", "Shumsky, Elena"]
-    assert resets["n"] == 2
-    assert data["search_fallback"] == "name" and data["carrier_name"] == "x"
-
-
-@pytest.mark.asyncio
-async def test_graph_no_name_fallback_without_a_name_in_hint(monkeypatch):
-    from portal.flows._runner import PatientNotFoundError
-
-    _stub_downstream(monkeypatch)
-
-    async def fake_patient_found(flow):
-        raise PatientNotFoundError("no search result matched the query")
-
-    monkeypatch.setattr(ig, "stage_patient_found", fake_patient_found)
+    clicks: list[str] = []
+    search = _Search({})
+    flow = _flow("Custidero, Louis", "name: Custidero, Louis; date of birth 01/01/1970", search, clicks)
     with pytest.raises(PatientNotFoundError):
-        await ig.run_get_insurance_details_graph(
-            object(), "2085", checkpoints=Checkpoints(capture=False),
-            patient_hint="date of birth 02/07/1980",
-        )
-
-
-def test_name_from_hint_parsing():
-    assert ig.name_from_hint("chart number 2085; name: Shumsky, Elena; date of birth 02/07/1980") == "Shumsky, Elena"
-    assert ig.name_from_hint('name="Blatnoy, Aaron"') == "Blatnoy, Aaron"
-    assert ig.name_from_hint("date of birth 01/01/1970") == ""
+        await st.stage_patient_found(flow)
+    assert search.typed == ["Custidero, Louis", "01/01/1970"] and clicks == []
 
 
 @pytest.mark.asyncio
-async def test_graph_name_fallback_runs_once_then_reports_not_found(monkeypatch):
-    """Digit search empty -> one name retry -> still empty -> PatientNotFound.
-    No third search, no model call, no fan-out."""
-    from portal.flows._runner import PatientNotFoundError
-
+async def test_graph_reports_blocked_eligibility_without_clicking(monkeypatch):
+    """Details disabled (missing payer id): no click, no 30 s wait, reason reported."""
     _stub_downstream(monkeypatch)
-    searched: list[str] = []
-    asked = {"s1": 0}
 
-    async def fake_patient_found(flow: InsuranceFlowState):
-        searched.append(flow.patient)
-        raise PatientNotFoundError("no search result matched the query")
+    async def fake_disabled(ins):
+        return True
 
-    async def fake_pick(**kw):
-        asked["s1"] += 1
-        return None, {}
+    async def never_open(app, ins):
+        raise AssertionError("must not click Details when it is disabled")
 
-    monkeypatch.setattr(ig, "stage_patient_found", fake_patient_found)
-    monkeypatch.setattr(ig, "pick_patient_candidate", fake_pick)
+    async def fake_scrape(ins):
+        return {"carrier_name": "x", "eligibility_status": "Missing Eligibility Payer ID"}
 
-    with pytest.raises(PatientNotFoundError):
-        await ig.run_get_insurance_details_graph(
-            object(), "2085", checkpoints=Checkpoints(capture=False),
-            patient_hint="chart number 2085; name: Shumsky, Elena",
-        )
-    assert searched == ["2085", "Shumsky, Elena"]
-    assert asked["s1"] == 0
+    monkeypatch.setattr(ig, "details_disabled", fake_disabled)
+    monkeypatch.setattr(ig, "open_eligibility_frame", never_open)
+    monkeypatch.setattr("portal.flows.insurance._scrape_fields", fake_scrape)
+    monkeypatch.setattr(ig, "stage_patient_found", _noop)
+
+    data = await ig.run_check_eligibility_graph(object(), "Test, Patient", checkpoints=Checkpoints(capture=False))
+    assert data["eligibility_blocked"] is True
+    assert data["eligibility_blocked_reason"] == "missing_payer_id"
+    assert data["eligibility_available"] is False

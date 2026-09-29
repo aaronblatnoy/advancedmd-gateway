@@ -175,6 +175,8 @@ def test_panel_never_attaches_returns_unavailable(monkeypatch):
 
 def test_eligibility_fields_whitelist_is_fixed():
     assert eligibility.ELIGIBILITY_FIELDS == [
+        "eligibility_blocked",
+        "eligibility_blocked_reason",
         "eligibility_available",
         "eligibility_no_data",
         "eligibility_plan_status",
