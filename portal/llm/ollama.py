@@ -30,12 +30,15 @@ class OllamaRecoveryLLM:
         model: str | None = None,
         timeout_s: float = 60.0,
     ) -> None:
-        self.base_url = (
-            base_url
-            or os.environ.get(
-                "PORTAL_LLM_BASE_URL", "http://100.94.62.115:8000"
-            )
-        ).rstrip("/")
+        from portal.llm.system_one import assert_local_model_url
+
+        self.base_url = assert_local_model_url(
+            (
+                base_url
+                or os.environ.get("PORTAL_LLM_BASE_URL", "http://100.94.62.115:8000")
+            ).rstrip("/"),
+            what="PORTAL_LLM_BASE_URL",
+        )
         self.model = model or os.environ.get(
             "PORTAL_LLM_MODEL", "llama3.2-vision"
         )

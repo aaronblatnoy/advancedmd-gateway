@@ -14,15 +14,59 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+import ipaddress
+import urllib.parse
+
 import httpx
 
 log = logging.getLogger("portal.system_one")
 
+
+class HostedModelForbidden(RuntimeError):
+    """The configured model endpoint is not on-box / tailnet / private."""
+
+
+_PRIVATE_NETS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),   # Tailscale CGNAT range
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fd00::/8"),
+)
+
+
+def assert_local_model_url(url: str, *, what: str) -> str:
+    """Fail closed: PHI-bearing model calls may only target on-box, tailnet,
+    private-network or Docker-DNS hosts (Codex audit 2026-09-29: the local
+    default was not an enforced invariant). Returns the url unchanged."""
+    p = urllib.parse.urlparse(url)
+    host = (p.hostname or "").strip().lower()
+    if not host:
+        raise HostedModelForbidden(f"{what}: url has no host: {url!r}")
+    if host in ("localhost",) or host.endswith(".localhost"):
+        return url
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # Not an IP. Allow Docker service / tailnet MagicDNS style names
+        # (no dots, or *.ts.net); refuse anything that looks like a public
+        # domain.
+        if "." not in host or host.endswith(".ts.net") or host.endswith(".internal"):
+            return url
+        raise HostedModelForbidden(f"{what}: {host} is not an on-box or tailnet host")
+    if any(ip in net for net in _PRIVATE_NETS):
+        return url
+    raise HostedModelForbidden(f"{what}: {host} is a public address")
+
 __all__ = [
     "ChoiceAnswer",
+    "HostedModelForbidden",
     "PortalSystemOne",
     "SystemOneError",
     "SystemOneUnavailable",
+    "assert_local_model_url",
     "system_one_from_env",
 ]
 
@@ -65,9 +109,10 @@ class PortalSystemOne:
         model: str | None = None,
         timeout_s: float = 30.0,
     ) -> None:
-        self.base_url = (
-            base_url or os.environ.get("S1_SERVER_URL", DEFAULT_S1_URL)
-        ).rstrip("/")
+        self.base_url = assert_local_model_url(
+            (base_url or os.environ.get("S1_SERVER_URL", DEFAULT_S1_URL)).rstrip("/"),
+            what="S1_SERVER_URL",
+        )
         self.api_key = api_key or os.environ.get("S1_SERVER_API_KEY", "")
         self.model = model or os.environ.get("S1_MODEL", DEFAULT_S1_MODEL)
         self.timeout_s = timeout_s

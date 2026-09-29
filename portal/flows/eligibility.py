@@ -61,6 +61,7 @@ _CHECK_ELIGIBILITY_SECTION = ".service-type-and-check-eligibility-section"
 # exposes. ``eligibility_available`` is the deterministic presence flag;
 # the rest are best-effort text reads that stay empty when absent.
 ELIGIBILITY_FIELDS = [
+    "eligibility_outcome",       # closed: active | inactive | unverifiable | blocked (portal's verdict)
     "eligibility_blocked",       # bool: AMD cannot run eligibility on this plan (Details disabled)
     "eligibility_blocked_reason",  # closed: missing_payer_id | invalid_subscriber | not_eligible_plan | other
     "eligibility_click_fired",   # bool: check_eligibility mode clicked the card control
@@ -101,7 +102,43 @@ async def _empty_eligibility(available: bool, no_data: bool) -> dict:
     d["eligibility_click_fired"] = False
     d["eligibility_grid_refreshed"] = False
     d["eligibility_service_types"] = []
+    d["eligibility_outcome"] = "unverifiable"
     return d
+
+
+_ACTIVE_WORDS = ("active", "eligible", "covered")
+_INACTIVE_WORDS = ("inactive", "not active", "ineligible", "terminated", "not eligible", "not covered")
+
+
+def closed_outcome(elig: dict) -> str:
+    """The portal's own closed verdict for one plan: active | inactive |
+    unverifiable | blocked. Fail-closed: green needs a positive active
+    status. Callers may still confirm green from the stored record."""
+    if elig.get("eligibility_blocked") is True:
+        return "blocked"
+    if elig.get("eligibility_no_data") is True or elig.get("eligibility_available") is not True:
+        return "unverifiable"
+    status = " ".join(str(elig.get(k) or "") for k in ("eligibility_plan_status", "eligibility_status")).lower()
+    if any(w in status for w in _INACTIVE_WORDS):
+        return "inactive"
+    if any(w in status for w in _ACTIVE_WORDS):
+        return "active"
+    return "unverifiable"
+
+
+def aggregate_outcome(outcomes: list[str]) -> str:
+    """Closed verdict over duplicate rows: green only if every checked row is
+    active; all blocked -> blocked; any inactive with no active -> inactive;
+    otherwise unverifiable."""
+    if not outcomes:
+        return "unverifiable"
+    if all(o == "active" for o in outcomes):
+        return "active"
+    if all(o == "blocked" for o in outcomes):
+        return "blocked"
+    if "inactive" in outcomes and "active" not in outcomes:
+        return "inactive"
+    return "unverifiable"
 
 
 async def blocked_eligibility(comment: str) -> dict:
@@ -109,6 +146,7 @@ async def blocked_eligibility(comment: str) -> dict:
     d = await _empty_eligibility(available=False, no_data=False)
     d["eligibility_blocked"] = True
     d["eligibility_blocked_reason"] = classify_blocked_reason(comment)
+    d["eligibility_outcome"] = "blocked"
     return d
 
 

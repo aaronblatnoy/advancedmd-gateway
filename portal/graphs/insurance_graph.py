@@ -20,6 +20,7 @@ from portal.flows._runner import Checkpoints
 from portal.flows.eligibility import (
     ELIGIBILITY_FIELDS,
     blocked_eligibility,
+    closed_outcome,
     check_eligibility_disabled,
     close_eligibility_panel,
     details_disabled,
@@ -171,6 +172,10 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
             elig = await read_eligibility_from_frame(None)
             elig["eligibility_click_fired"] = bool(fired.get("fired"))
             elig["eligibility_grid_refreshed"] = bool(fired.get("grid_last_changed"))
+            # The click fired; the carrier answers asynchronously and the
+            # stored record is the verdict source, so the portal's own
+            # closed outcome here is honestly "unverifiable".
+            elig["eligibility_outcome"] = "unverifiable"
             data = dict(state.get("data") or {})
             data.update(elig)
             return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
@@ -191,6 +196,7 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
         elig = await read_eligibility_from_frame(frame)
         data = dict(state.get("data") or {})
         data.update(elig)
+        data["eligibility_outcome"] = closed_outcome(data)
         return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
     except Exception as exc:
         return {"failed_stage": stage, "retry_stage": stage, "last_error": exc}

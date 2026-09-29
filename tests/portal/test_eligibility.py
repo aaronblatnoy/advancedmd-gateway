@@ -175,6 +175,7 @@ def test_panel_never_attaches_returns_unavailable(monkeypatch):
 
 def test_eligibility_fields_whitelist_is_fixed():
     assert eligibility.ELIGIBILITY_FIELDS == [
+        "eligibility_outcome",
         "eligibility_blocked",
         "eligibility_blocked_reason",
         "eligibility_click_fired",
@@ -191,3 +192,38 @@ def test_eligibility_fields_whitelist_is_fixed():
         "eligibility_out_of_pocket",
         "eligibility_service_types",
     ]
+
+
+def test_closed_outcome_and_aggregate_are_fail_closed():
+    co = eligibility.closed_outcome
+    assert co({"eligibility_blocked": True}) == "blocked"
+    assert co({"eligibility_available": False}) == "unverifiable"
+    assert co({"eligibility_available": True, "eligibility_no_data": True}) == "unverifiable"
+    assert co({"eligibility_available": True, "eligibility_plan_status": "Active Coverage"}) == "active"
+    assert co({"eligibility_available": True, "eligibility_plan_status": "Inactive"}) == "inactive"
+    assert co({"eligibility_available": True, "eligibility_plan_status": "Pending"}) == "unverifiable"
+    ag = eligibility.aggregate_outcome
+    assert ag(["active", "active"]) == "active"
+    assert ag(["blocked", "blocked"]) == "blocked"
+    assert ag(["inactive", "blocked"]) == "inactive"
+    assert ag(["active", "inactive"]) == "unverifiable"
+    assert ag([]) == "unverifiable"
+
+
+def test_model_urls_must_be_local(monkeypatch):
+    from portal.llm.system_one import HostedModelForbidden, PortalSystemOne, assert_local_model_url
+    from portal.llm.ollama import OllamaRecoveryLLM
+    import pytest as _pt
+
+    for ok in ("http://100.94.62.115:8003", "http://localhost:8003", "http://s1-server:8003",
+               "http://10.0.1.30:8821", "http://black-sky.tail1234.ts.net:8003"):
+        assert assert_local_model_url(ok, what="t") == ok
+    for bad in ("https://api.typesafe.ai/v1", "https://api.openai.com", "http://8.8.8.8:80"):
+        with _pt.raises(HostedModelForbidden):
+            assert_local_model_url(bad, what="t")
+    monkeypatch.setenv("S1_SERVER_URL", "https://api.typesafe.ai")
+    with _pt.raises(HostedModelForbidden):
+        PortalSystemOne(api_key="k")
+    monkeypatch.setenv("PORTAL_LLM_BASE_URL", "https://api.openai.com/v1")
+    with _pt.raises(HostedModelForbidden):
+        OllamaRecoveryLLM()

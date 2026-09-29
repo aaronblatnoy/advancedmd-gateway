@@ -65,6 +65,14 @@ per-event-loop lock (`_flow_lock`; `/health` reports `browser.busy`, results
 carry `meta.browser_wait_ms` when a caller waited). Callers reach the
 sidecar directly (`:8821`), never via `/v1/tools` on `:8820`.
 
+## INV-PORTAL-LOCAL-MODELS (MUST)
+
+Every model endpoint the portal talks to (`S1_SERVER_URL`, `PORTAL_LLM_BASE_URL`)
+must be on-box, tailnet (100.64/10, *.ts.net), private-network, localhost or a
+Docker service name. `portal/llm/system_one.assert_local_model_url` enforces it
+fail-closed at construction (Codex audit 2026-09-29: the local default alone was
+not an invariant). Hosted model APIs never see portal state.
+
 ## INV-PORTAL-LANGGRAPH (MUST)
 
 Portal flows are **LangGraphs of deterministic checkpoint nodes** with a

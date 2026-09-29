@@ -131,6 +131,8 @@ async def _run_with_fanout(
                 f"checked {len(matches)} candidate rows "
                 f"({sum(1 for m in matches if m['ok'])} ok)"
             )
+        from .eligibility import aggregate_outcome
+
         return {
             "patient": patient,
             "insurance_index": insurance_index,
@@ -138,6 +140,10 @@ async def _run_with_fanout(
             "candidates": len(cands),
             "system_one": dict(exc.s1),
             "matches": matches,
+            # Closed verdict over the rows so the caller reads, not derives.
+            "eligibility_outcome": aggregate_outcome(
+                [str(m.get("eligibility_outcome") or "unverifiable") for m in matches if m.get("ok")]
+            ),
         }
 
 
@@ -183,7 +189,7 @@ _BATCH_OK_KEYS = set(FIELDS) | set(ELIGIBILITY_FIELDS) | set(
 ) | {
     "patient", "insurance_index", "index", "session_reestablished", "ok",
     "trace", "patient_disambiguation", "matched_candidate",
-    "ambiguous", "candidates", "system_one", "matches",
+    "ambiguous", "candidates", "system_one", "matches", "eligibility_outcome",
 }
 _BATCH_ERR_KEYS = {
     "ok", "flow", "error", "message", "diagnosis", "next_action",

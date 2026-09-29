@@ -63,7 +63,9 @@ all claims value fields are empty, and `claims_address_reason` is one of
 `carrier_detail_not_opened`, `element_not_found`, or
 `selectors_not_verified`. On success the reason is an empty string.
 
-271 Details (prefix `eligibility_`): `eligibility_blocked` (AMD renders
+271 Details (prefix `eligibility_`): `eligibility_outcome` (the portal's closed
+verdict: `active` | `inactive` | `unverifiable` | `blocked`; for duplicate fan-outs
+an aggregate over the rows; callers read it rather than deriving one), `eligibility_blocked` (AMD renders
 Details disabled: the plan cannot be checked), `eligibility_blocked_reason`
 (`missing_payer_id` | `invalid_subscriber` | `not_eligible_plan` | `other`,
 from the grid's eligibility comment), `eligibility_available`,
