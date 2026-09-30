@@ -83,16 +83,24 @@ Navigation chain: [insurance-flow.md](insurance-flow.md)
 ## check_eligibility (owner-gated write)
 
 Fire AMD **Check Eligibility** (billable 271 inquiry). Same navigation as
-`get_insurance_details` up to the insurance card, then (observed live
-2026-09-29): select the coverage row `#tblInsCoverages tr[id^=ins]` for
-`insurance_index` (it shows `data-selected="1"`), click the card's
-`#btnEligibilityOnDemand`. Clicking with no row selected does nothing.
-AMD answers asynchronously; callers confirm green from the stored record
-(`getdemographic`: `eligibilitystatusid == 1` and an advanced
-`eligibilityresponsedate`). **Idempotent within a day:** if the row's Last
-Checked already shows today the click is skipped and
-`eligibility_click_skipped=true` is returned (`PORTAL_CHECK_ELIGIBILITY_FORCE=1`
-overrides). `PORTAL_CHECK_VIA_CARD=0` falls back to the Details-panel click.
+`get_insurance_details` up to the insurance card, then (owner 2026-09-30:
+every insurance row) for EACH row of the coverage grid
+`#tblInsCoverages tr[id^=ins]`, in grid order: click the row (it shows
+`data-selected="1"`); if AMD disables Check Eligibility / Details for that
+row it is reported blocked with a closed reason; if its Last Checked already
+shows today it is skipped (idempotent; `PORTAL_CHECK_ELIGIBILITY_FORCE=1`
+overrides); otherwise click the card's `#btnEligibilityOnDemand` and wait up
+to 30 s for that row's Last Checked to change. Clicking with no row selected
+does nothing. AMD answers asynchronously; callers confirm green from the
+stored record (`getdemographic`: `eligibilitystatusid == 1` and an advanced
+`eligibilityresponsedate`). Result carries `eligibility_rows` (one record per
+row: `index, selected, blocked, blocked_reason, skipped, fired, refreshed,
+last_checked_before, last_checked_after`), `eligibility_rows_total / _fired /
+_refreshed`, and the aggregate flags: `eligibility_click_fired` (any row),
+`eligibility_grid_refreshed` (any row), `eligibility_click_skipped` (every
+clickable row already checked today), `eligibility_blocked` (every row
+blocked; `eligibility_outcome=blocked`). `insurance_index` is kept for the
+Details fallback (`PORTAL_CHECK_VIA_CARD=0`).
 
 Accepts the same `patient_hint` and applies the same duplicate rule as
 `get_insurance_details` (each candidate row gets its own billable click, so

@@ -19,6 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from portal.flows._runner import Checkpoints
 from portal.flows.eligibility import (
+    check_all_coverage_rows,
     ELIGIBILITY_FIELDS,
     blocked_eligibility,
     checked_today,
@@ -152,50 +153,21 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
     try:
         comment = str((state.get("data") or {}).get("eligibility_status") or "")
         if mode == "check_eligibility":
-            # Blocked plan: AMD disables both Details and Check Eligibility
-            # (missing payer ID, invalid subscriber). Report, never click.
-            if await check_eligibility_disabled(flow.ins) or await details_disabled(flow.ins):
-                elig = await blocked_eligibility(comment)
-                flow.checkpoints.note(
-                    f"eligibility blocked by AMD: {elig['eligibility_blocked_reason']} (controls disabled)"
-                )
-                log.info("insurance_graph eligibility blocked reason=%s mode=%s",
-                         elig["eligibility_blocked_reason"], mode)
-                data = dict(state.get("data") or {})
-                data.update(elig)
-                return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
-
             if os.environ.get("PORTAL_CHECK_VIA_CARD", "1") != "0":
-                # DEFAULT (owner flow, proven live 2026-09-29 14:36 on the
-                # test patient: stored 271 advanced within 40 s): in the
-                # insurance panel select the coverage row, then click the
-                # card's Check Eligibility (#btnEligibilityOnDemand). The
-                # 13:43 failure was clicking it with no row selected.
-                # PORTAL_CHECK_VIA_CARD=0 falls back to the Details-panel
-                # click below.
+                # DEFAULT (owner 2026-09-30: "you should click for every
+                # insurance row. you click the row, then click check
+                # eligibility"): walk every coverage row of the grid; per
+                # row select it, report blocked when AMD disables the
+                # controls, skip when already checked today (idempotent),
+                # else click the card's Check Eligibility
+                # (#btnEligibilityOnDemand) and wait for that row's Last
+                # Checked to change. Green is confirmed by the caller from
+                # the stored record. PORTAL_CHECK_VIA_CARD=0 keeps the
+                # Details-panel click below.
                 stage = "eligibility_check_fired"
-                from portal.flows.insurance import _ROW
-
-                # Idempotent: select the row first and read its Last Checked.
-                # Already checked today -> no second billable click.
-                await select_coverage_row(flow.ins, flow.insurance_index)
-                last = await selected_row_last_checked(flow.ins)
-                if checked_today(last) and os.environ.get("PORTAL_CHECK_ELIGIBILITY_FORCE", "0") != "1":
-                    elig = await read_eligibility_from_frame(None)
-                    elig["eligibility_click_skipped"] = True
-                    elig["eligibility_last_checked_card"] = last
-                    elig["eligibility_outcome"] = "unverifiable"  # caller confirms from the stored record
-                    flow.checkpoints.note("check eligibility skipped: row already checked today (idempotent)")
-                    log.info("insurance_graph check skipped: already checked today")
-                    data = dict(state.get("data") or {})
-                    data.update(elig)
-                    return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
-
+                force = os.environ.get("PORTAL_CHECK_ELIGIBILITY_FORCE", "0") == "1"
                 async with flow.checkpoints.stage("eligibility_check_fired", flow.app):
-                    fired = await fire_check_eligibility_on_card(
-                        flow.ins, insurance_index=flow.insurance_index,
-                        grid_last_selector=f"{_ROW} td:nth-child(7)",
-                    )
+                    per_rows = await check_all_coverage_rows(flow.ins, force=force)
                     try:
                         import time as _t
                         from pathlib import Path as _P
@@ -206,10 +178,36 @@ async def eligibility_node(state: InsuranceGraphState) -> dict:
                     except Exception:
                         pass
                 elig = await read_eligibility_from_frame(None)
-                elig["eligibility_click_fired"] = bool(fired.get("fired"))
-                elig["eligibility_grid_refreshed"] = bool(fired.get("grid_last_changed"))
-                elig["eligibility_last_checked_card"] = await selected_row_last_checked(flow.ins)
-                elig["eligibility_outcome"] = "unverifiable"
+                elig.update(per_rows)
+                if per_rows["eligibility_blocked"]:
+                    elig["eligibility_outcome"] = "blocked"
+                    flow.checkpoints.note(
+                        f"eligibility blocked by AMD: {per_rows['eligibility_blocked_reason']} (controls disabled on every row)"
+                    )
+                else:
+                    elig["eligibility_outcome"] = "unverifiable"  # caller confirms from the stored record
+                    if per_rows["eligibility_click_skipped"]:
+                        flow.checkpoints.note("check eligibility skipped: every row already checked today (idempotent)")
+                log.info(
+                    "insurance_graph check rows total=%s fired=%s refreshed=%s blocked=%s skipped=%s mode=%s",
+                    per_rows["eligibility_rows_total"], per_rows["eligibility_rows_fired"],
+                    per_rows["eligibility_rows_refreshed"], per_rows["eligibility_blocked"],
+                    per_rows["eligibility_click_skipped"], mode,
+                )
+                data = dict(state.get("data") or {})
+                data.update(elig)
+                return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}
+
+            # Blocked plan (Details fallback path): AMD disables both
+            # Details and Check Eligibility (missing payer ID, invalid
+            # subscriber). Report, never click.
+            if await check_eligibility_disabled(flow.ins) or await details_disabled(flow.ins):
+                elig = await blocked_eligibility(comment)
+                flow.checkpoints.note(
+                    f"eligibility blocked by AMD: {elig['eligibility_blocked_reason']} (controls disabled)"
+                )
+                log.info("insurance_graph eligibility blocked reason=%s mode=%s",
+                         elig["eligibility_blocked_reason"], mode)
                 data = dict(state.get("data") or {})
                 data.update(elig)
                 return {"data": data, "failed_stage": None, "retry_stage": None, "last_error": None}

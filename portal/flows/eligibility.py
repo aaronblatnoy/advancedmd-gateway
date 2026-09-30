@@ -66,8 +66,12 @@ ELIGIBILITY_FIELDS = [
     "eligibility_last_checked_card",  # the selected row's Last Checked date as shown on the card
     "eligibility_blocked",       # bool: AMD cannot run eligibility on this plan (Details disabled)
     "eligibility_blocked_reason",  # closed: missing_payer_id | invalid_subscriber | not_eligible_plan | other
-    "eligibility_click_fired",   # bool: check_eligibility mode clicked the card control
-    "eligibility_grid_refreshed",  # bool: the card's Last-checked cell changed after the click
+    "eligibility_click_fired",   # bool: check_eligibility mode clicked the card control (any row)
+    "eligibility_grid_refreshed",  # bool: a Last-checked cell changed after a click (any row)
+    "eligibility_rows",          # list: one closed record per coverage row (index, dates, skipped/blocked/fired/refreshed)
+    "eligibility_rows_total",    # int: coverage rows in the grid
+    "eligibility_rows_fired",    # int: rows whose Check Eligibility was clicked this call
+    "eligibility_rows_refreshed",  # int: rows whose Last Checked advanced after the click
     "eligibility_available",     # bool: a carrier response is on file
     "eligibility_no_data",       # bool: "No Data Received From Carrier"
     "eligibility_plan_status",   # e.g. Active / Inactive coverage
@@ -429,8 +433,108 @@ async def select_coverage_row(ins, insurance_index: int = 1, timeout_s: int = 10
     return False
 
 
+async def coverage_row_count(ins) -> int:
+    try:
+        return await ins.locator(_COVERAGE_ROWS).count()
+    except Exception:
+        return 0
+
+
+def _row_last_checked_locator(ins, insurance_index: int):
+    try:
+        return ins.locator(_COVERAGE_ROWS).nth(insurance_index - 1).locator("td:nth-child(7)").first
+    except Exception:
+        return None
+
+
+async def row_last_checked(ins, insurance_index: int) -> str:
+    """Last Checked (column 7) of coverage row ``insurance_index`` (1-based)."""
+    try:
+        loc = ins.locator(_COVERAGE_ROWS).nth(insurance_index - 1).locator("td:nth-child(7)")
+        if await loc.count():
+            return (await loc.first.inner_text()).strip()
+    except Exception:
+        pass
+    return ""
+
+
+async def selected_row_comment(ins) -> str:
+    """The selected row's Eligibility Comments title (AMD status text, no PHI)."""
+    try:
+        loc = ins.locator("#tblInsCoverages tr[data-selected='1'] td:last-child")
+        if await loc.count():
+            return (await loc.first.get_attribute("title") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+async def check_all_coverage_rows(ins, *, force: bool = False, settle_s: int = 30,
+                                  today=None) -> dict:
+    """Owner 2026-09-30: "you should click for every insurance row. you click
+    the row, then click check eligibility." For each row of the coverage
+    grid, in grid order: select it, read its Last Checked, report it blocked
+    when AMD disables the controls for that row, skip it when already
+    checked today (idempotent), otherwise click Check Eligibility and wait
+    for that row's Last Checked to change. One closed record per row; the
+    aggregate flags keep the single-row contract callers already read.
+    Logs carry indexes, counts and closed reasons only.
+    """
+    n = await coverage_row_count(ins)
+    rows: list[dict] = []
+    for i in range(1, n + 1):
+        rec: dict = {"index": i, "selected": False, "blocked": False, "blocked_reason": None,
+                     "skipped": False, "fired": False, "refreshed": False,
+                     "last_checked_before": "", "last_checked_after": ""}
+        rec["selected"] = await select_coverage_row(ins, i)
+        rec["last_checked_before"] = await row_last_checked(ins, i)
+        if not rec["selected"]:
+            log.info("flow=eligibility row %s/%s not selectable; not clicked", i, n)
+            rows.append(rec)
+            continue
+        if await check_eligibility_disabled(ins) or await details_disabled(ins):
+            rec["blocked"] = True
+            rec["blocked_reason"] = classify_blocked_reason(await selected_row_comment(ins))
+            log.info("flow=eligibility row %s/%s blocked reason=%s", i, n, rec["blocked_reason"])
+        elif checked_today(rec["last_checked_before"], today) and not force:
+            rec["skipped"] = True
+            log.info("flow=eligibility row %s/%s already checked today; skipped (idempotent)", i, n)
+        else:
+            fired = await fire_check_eligibility_on_card(
+                ins, insurance_index=i,
+                grid_last_locator=_row_last_checked_locator(ins, i),
+                settle_s=settle_s,
+            )
+            rec["fired"] = bool(fired.get("fired"))
+            rec["refreshed"] = bool(fired.get("grid_last_changed"))
+        rec["last_checked_after"] = await row_last_checked(ins, i)
+        rows.append(rec)
+    fired_n = sum(1 for r in rows if r["fired"])
+    refreshed_n = sum(1 for r in rows if r["refreshed"])
+    blocked = [r for r in rows if r["blocked"]]
+    clickable = [r for r in rows if r["selected"] and not r["blocked"]]
+    out = {
+        "eligibility_rows": rows,
+        "eligibility_rows_total": n,
+        "eligibility_rows_fired": fired_n,
+        "eligibility_rows_refreshed": refreshed_n,
+        "eligibility_click_fired": fired_n > 0,
+        "eligibility_grid_refreshed": refreshed_n > 0,
+        # every clickable row was already checked today -> idempotent no-op
+        "eligibility_click_skipped": bool(clickable) and all(r["skipped"] for r in clickable),
+        # AMD refuses every row -> blocked (first row's reason)
+        "eligibility_blocked": n > 0 and len(blocked) == n,
+        "eligibility_blocked_reason": blocked[0]["blocked_reason"] if blocked and len(blocked) == n else None,
+        "eligibility_last_checked_card": rows[0]["last_checked_after"] if rows else "",
+    }
+    log.info("flow=eligibility rows total=%s fired=%s refreshed=%s skipped=%s blocked=%s",
+             n, fired_n, refreshed_n, sum(1 for r in rows if r["skipped"]), len(blocked))
+    return out
+
+
 async def fire_check_eligibility_on_card(ins, *, insurance_index: int = 1,
                                          grid_last_selector: str | None = None,
+                                         grid_last_locator=None,
                                          settle_s: int = 30) -> dict:
     """Owner flow (2026-09-29): in the insurance panel, select the coverage
     row, then click Check Eligibility on the card. Green is confirmed by the
@@ -441,10 +545,12 @@ async def fire_check_eligibility_on_card(ins, *, insurance_index: int = 1,
     selected = await select_coverage_row(ins, insurance_index)
     btn = await _card_control(ins, _CHECK_ELIGIBILITY_LABEL)
     await btn.first.wait_for(state="visible", timeout=15000)
+    if grid_last_locator is None and grid_last_selector:
+        grid_last_locator = ins.locator(grid_last_selector).first
     before = ""
-    if grid_last_selector:
+    if grid_last_locator is not None:
         try:
-            before = (await ins.locator(grid_last_selector).first.inner_text()).strip()
+            before = (await grid_last_locator.inner_text()).strip()
         except Exception:
             before = ""
     await _log_structure(ins, "ins-card-before-click")
@@ -466,10 +572,10 @@ async def fire_check_eligibility_on_card(ins, *, insurance_index: int = 1,
             pass
         await asyncio.sleep(_POLL_S)
     changed = False
-    if grid_last_selector:
+    if grid_last_locator is not None:
         for _ in range(_ticks(settle_s)):
             try:
-                now = (await ins.locator(grid_last_selector).first.inner_text()).strip()
+                now = (await grid_last_locator.inner_text()).strip()
                 if now and now != before:
                     changed = True
                     break

@@ -150,22 +150,24 @@ async def check_eligibility(
     confirm: bool = False,
     patient_hint: str = "",
 ) -> str:
-    """Fire AMD portal Check Eligibility (billable) for one coverage.
+    """Fire AMD portal Check Eligibility (billable) for every coverage row.
 
     Owner-gated write. Requires the sidecar env
     AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 and confirm=true. Scripted, no
     model: finds the patient (date of birth first, then name; chart number
     picks the row in code; System One only for a residual duplicate), opens
-    Patient Info > Insurance, SELECTS the coverage row (insurance_index,
-    1 = primary), then clicks the card's Check Eligibility button. AMD
-    answers asynchronously: confirm green from the stored record
+    Patient Info > Insurance, then for EVERY row of the coverage grid
+    (owner 2026-09-30): clicks the row, then clicks the card's Check
+    Eligibility button and waits for that row's Last Checked to change.
+    AMD answers asynchronously: confirm green from the stored record
     (getdemographic eligibilitystatusid == 1 with an advanced
     eligibilityresponsedate), not from this reply.
-    Idempotent within a day: if the row's Last Checked already shows today
-    the click is skipped and eligibility_click_skipped=true is returned
-    (PORTAL_CHECK_ELIGIBILITY_FORCE=1 overrides). A plan whose controls AMD
-    disables (missing payer ID, invalid subscriber) is reported as
-    eligibility_blocked with a reason and never clicked. Never clicks Save /
+    Idempotent within a day: a row whose Last Checked already shows today
+    is skipped (eligibility_click_skipped=true when every row was;
+    PORTAL_CHECK_ELIGIBILITY_FORCE=1 overrides). A row whose controls AMD
+    disables (missing payer ID, invalid subscriber) is reported blocked
+    with a reason and never clicked (eligibility_blocked=true when every
+    row is). Per-row records are returned in eligibility_rows. Never clicks Save /
     Submit / Bypass. Returns JSON {"ok": true, "data": {...}} or
     {"ok": false, ...}.
     """

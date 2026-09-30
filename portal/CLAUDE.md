@@ -114,11 +114,17 @@ its safety properties are structural instead:
    the server is bounded and reviewable.
 3. **Read-only by default.** `get_insurance_details` observes only.
    The ONE billable write is **`check_eligibility`**: in the insurance
-   panel it selects the coverage row (`#tblInsCoverages tr[id^=ins]`,
-   `data-selected="1"`) then clicks the card's `#btnEligibilityOnDemand`
-   (observed live 2026-09-29; clicking without a selected row does
-   nothing). `PORTAL_CHECK_VIA_CARD=0` falls back to the Details-panel
-   click. Gated by `AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1` +
+   panel it walks EVERY coverage row (`#tblInsCoverages tr[id^=ins]`;
+   owner 2026-09-30: "you should click for every insurance row. you click
+   the row, then click check eligibility"): per row it clicks the row
+   (`data-selected="1"`), reports it blocked when AMD disables the
+   controls, skips it when Last Checked is already today, else clicks the
+   card's `#btnEligibilityOnDemand` and waits for that row's Last Checked
+   to change (`flows/eligibility.check_all_coverage_rows`; one closed
+   record per row in `eligibility_rows`). Clicking with no row selected
+   does nothing (observed live 2026-09-29); clicking only row 1 missed 16
+   of 152 clicks on multi-row charts (2026-09-30). `PORTAL_CHECK_VIA_CARD=0`
+   falls back to the Details-panel click. Gated by `AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1` +
    `confirm=true` + token allowlist. Decision:
    `memory/decisions/2026-09-14-portal-check-eligibility-write.md`.
    Any other submit/mutate flow still needs a new decision file.

@@ -55,8 +55,9 @@ PORTAL_REGISTRY: dict[str, PortalToolEntry] = {
         name="check_eligibility",
         description=(
             "Owner-gated billable write: open Patient Info > Insurance, "
-            "select the coverage row, click the card's Check Eligibility. "
-            "Idempotent within a day (skips when Last Checked is today). "
+            "then for EVERY coverage row: click the row, click the card's "
+            "Check Eligibility, wait for that row's Last Checked to change. "
+            "Idempotent within a day (a row is skipped when Last Checked is today). "
             "Green is confirmed by the caller from the stored record. "
             "Requires AMD_PORTAL_CHECK_ELIGIBILITY_ENABLED=1 and "
             "args.confirm=true. Appointment-validator uses this when stored "
