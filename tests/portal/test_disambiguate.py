@@ -431,6 +431,10 @@ def _fake_grid(monkeypatch, rows, *, fire_changes=True, comment="Missing Eligibi
     async def comment_of(ins):
         return comment
 
+    async def form_value(ins, selector):
+        row = rows[state["selected"] - 1]
+        return row.get({"#txtSubscriberID": "subscriber", "#txtPayerID": "payer"}.get(selector, ""), "x")
+
     async def fire(ins, *, insurance_index, **kw):
         calls["fire"].append(insurance_index)
         return {"fired": True, "row_selected": True, "grid_last_changed": fire_changes}
@@ -442,6 +446,7 @@ def _fake_grid(monkeypatch, rows, *, fire_changes=True, comment="Missing Eligibi
     monkeypatch.setattr(el, "check_eligibility_disabled", disabled)
     monkeypatch.setattr(el, "details_disabled", not_disabled)
     monkeypatch.setattr(el, "selected_row_comment", comment_of)
+    monkeypatch.setattr(el, "_form_value", form_value)
     monkeypatch.setattr(el, "fire_check_eligibility_on_card", fire)
     return calls
 
@@ -615,3 +620,22 @@ async def test_graph_check_mode_is_idempotent_within_a_day(monkeypatch):
     assert data["eligibility_rows_total"] == 2 and data["eligibility_rows_fired"] == 0
 
 
+
+
+@pytest.mark.asyncio
+async def test_blank_comment_blocked_rows_classified_from_card_form(monkeypatch):
+    """AMD disables the controls but the grid comment is blank: an empty
+    Subscriber ID field means invalid_subscriber, an empty Payer ID field
+    means missing_payer_id, both present stays other."""
+    monkeypatch.delenv("PORTAL_CHECK_VIA_CARD", raising=False)
+    _stub_downstream(monkeypatch)
+    calls = _fake_grid(monkeypatch, [
+        {"last": "01/01/2024", "blocked": True, "subscriber": "", "payer": "39026"},
+        {"last": "01/01/2024", "blocked": True, "subscriber": "925", "payer": ""},
+        {"last": "01/01/2024", "blocked": True, "subscriber": "925", "payer": "39026"},
+    ], comment="")
+    monkeypatch.setattr(ig, "stage_patient_found", _noop)
+    data = await ig.run_check_eligibility_graph(object(), "Test, Patient", checkpoints=Checkpoints(capture=False))
+    assert calls["fire"] == []
+    assert [r["blocked_reason"] for r in data["eligibility_rows"]] == ["invalid_subscriber", "missing_payer_id", "other"]
+    assert data["eligibility_blocked"] is True and data["eligibility_blocked_reason"] == "invalid_subscriber"

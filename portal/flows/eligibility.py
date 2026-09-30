@@ -488,6 +488,32 @@ async def row_active_flag(ins, insurance_index: int) -> str:
     return ""
 
 
+async def _form_value(ins, selector: str) -> str:
+    try:
+        loc = ins.locator(selector)
+        if await loc.count():
+            return (await loc.first.input_value()).strip()
+    except Exception:
+        pass
+    return ""
+
+
+async def blocked_reason_for_selected_row(ins) -> str:
+    """Closed reason for the selected row when AMD disables the controls.
+    The grid comment is the first source; when it is blank (2026-09-30:
+    four production charts, every one with an empty Subscriber ID and an
+    empty comment cell) the card form's Subscriber ID and Payer ID fields
+    decide. Never returns page text, only the closed enum."""
+    reason = classify_blocked_reason(await selected_row_comment(ins))
+    if reason != "other":
+        return reason
+    if not await _form_value(ins, "#txtSubscriberID"):
+        return "invalid_subscriber"
+    if not await _form_value(ins, "#txtPayerID"):
+        return "missing_payer_id"
+    return "other"
+
+
 async def selected_row_comment(ins) -> str:
     """The selected row's Eligibility Comments title (AMD status text, no PHI)."""
     try:
@@ -525,7 +551,7 @@ async def check_all_coverage_rows(ins, *, force: bool = False, settle_s: int = 3
             continue
         if await check_eligibility_disabled(ins) or await details_disabled(ins):
             rec["blocked"] = True
-            rec["blocked_reason"] = classify_blocked_reason(await selected_row_comment(ins))
+            rec["blocked_reason"] = await blocked_reason_for_selected_row(ins)
             log.info("flow=eligibility row %s/%s blocked reason=%s", i, n, rec["blocked_reason"])
         elif checked_today(rec["last_checked_before"], today) and not force:
             rec["skipped"] = True

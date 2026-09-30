@@ -53,3 +53,12 @@ clicked; nothing happened. AMD silently ignores Check Eligibility on an
 inactive row. Each row record now carries `active_flag`; inactive rows are
 still clicked per the owner's instruction (open question: skip `I` rows to
 save ~35 s each).
+
+## Blocked-reason refinement (2026-09-30 evening)
+
+Of 55 blocked appointments in the 2026-09-29/30 run, 4 were classified
+`other`: their grid comment cell was blank. Re-read through the portal, all
+four had an empty Subscriber ID on the card form. `blocked_reason_for_selected_row`
+now falls back to the form: empty Subscriber ID -> `invalid_subscriber`,
+empty Payer ID -> `missing_payer_id`, else `other`. Still the closed enum
+only; no page text leaves the process.
