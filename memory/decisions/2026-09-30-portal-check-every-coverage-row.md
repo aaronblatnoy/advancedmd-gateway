@@ -37,3 +37,19 @@ no model picks a row.
   twice.
 - Green is still confirmed by the caller from the stored primary plan.
 - `insurance_index` remains for the Details fallback only.
+
+## Live verification (owner chart 15076, 2026-09-30 02:55 EDT)
+
+Two rows. Row 1 (UHC, active): clicked; the card's Last Checked stayed
+09/29/2026 for 30 s, yet the stored record read through the XML gateway
+showed `eligibilitystatusid 1` with `eligibilityresponsedate 2026-09-29
+23:55`. AMD stamps on a Pacific clock, so at 02:55 Eastern its day was still
+09/29. Consequences: `checked_today` now compares against AMD's day
+(`amd_today()`, `PORTAL_AMD_TZ` default America/Los_Angeles) so a second
+click within AMD's day is skipped, and the card-date `refreshed` flag is
+informational only; green stays with the caller's stored-record check,
+which compares timestamps. Row 2 (UNI11, ended 12/04/2023, A/I = I):
+clicked; nothing happened. AMD silently ignores Check Eligibility on an
+inactive row. Each row record now carries `active_flag`; inactive rows are
+still clicked per the owner's instruction (open question: skip `I` rows to
+save ~35 s each).

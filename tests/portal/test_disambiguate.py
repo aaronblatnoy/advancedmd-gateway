@@ -418,6 +418,9 @@ def _fake_grid(monkeypatch, rows, *, fire_changes=True, comment="Missing Eligibi
     async def last(ins, idx):
         return rows[idx - 1]["last"]
 
+    async def flag(ins, idx):
+        return rows[idx - 1].get("ai", "A")
+
     async def disabled(ins):
         calls["disabled_checks"] += 1
         return rows[state["selected"] - 1].get("blocked", False)
@@ -435,6 +438,7 @@ def _fake_grid(monkeypatch, rows, *, fire_changes=True, comment="Missing Eligibi
     monkeypatch.setattr(el, "coverage_row_count", count)
     monkeypatch.setattr(el, "select_coverage_row", select)
     monkeypatch.setattr(el, "row_last_checked", last)
+    monkeypatch.setattr(el, "row_active_flag", flag)
     monkeypatch.setattr(el, "check_eligibility_disabled", disabled)
     monkeypatch.setattr(el, "details_disabled", not_disabled)
     monkeypatch.setattr(el, "selected_row_comment", comment_of)
@@ -497,7 +501,7 @@ async def test_graph_check_mode_clicks_every_coverage_row(monkeypatch):
         {"last": today},                       # row 1: idempotent skip
         {"last": "03/03/2024", "blocked": True},  # row 2: AMD disables the controls
         {"last": "09/13/2022"},                # row 3: clicked
-        {"last": ""},                          # row 4: never checked, clicked
+        {"last": "", "ai": "I"},               # row 4: inactive, never checked, still clicked
     ])
     monkeypatch.setattr(ig, "stage_patient_found", _noop)
 
@@ -513,8 +517,9 @@ async def test_graph_check_mode_clicks_every_coverage_row(monkeypatch):
     assert data["eligibility_click_fired"] is True and data["eligibility_click_skipped"] is False
     assert data["eligibility_blocked"] is False and data["eligibility_outcome"] == "unverifiable"
     # Row records are closed: no free text beyond dates and closed reasons.
-    assert set(rows[0]) == {"index", "selected", "blocked", "blocked_reason", "skipped", "fired",
-                            "refreshed", "last_checked_before", "last_checked_after"}
+    assert rows[3]["active_flag"] == "I" and rows[0]["active_flag"] == "A"
+    assert set(rows[0]) == {"index", "selected", "active_flag", "blocked", "blocked_reason", "skipped",
+                            "fired", "refreshed", "last_checked_before", "last_checked_after"}
 
 
 @pytest.mark.asyncio

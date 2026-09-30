@@ -242,3 +242,22 @@ def test_checked_today_is_date_only_and_tolerant():
     assert eligibility.checked_today("09/28/2026", today) is False
     assert eligibility.checked_today("", today) is False
     assert eligibility.checked_today("not a date", today) is False
+
+
+def test_checked_today_defaults_to_amd_pacific_day(monkeypatch):
+    """AMD stamps Last Checked on its own (Pacific) clock: at 02:55 Eastern a
+    click made minutes earlier still shows yesterday's date, and a second
+    click must be skipped. The default 'today' is AMD's day, not the host's."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    class _FixedDT(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = dt.datetime(2026, 9, 30, 6, 55, tzinfo=dt.timezone.utc)  # 02:55 EDT
+            return base.astimezone(tz) if tz else base.replace(tzinfo=None)
+
+    monkeypatch.setattr(dt, "datetime", _FixedDT)
+    assert eligibility.amd_today() == dt.date(2026, 9, 29)
+    assert eligibility.checked_today("09/29/2026") is True
+    assert eligibility.checked_today("09/30/2026") is False

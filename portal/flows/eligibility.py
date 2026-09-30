@@ -43,6 +43,7 @@ content.
 from __future__ import annotations
 
 import asyncio
+import os
 import logging
 
 log = logging.getLogger("amd_portal_mcp")
@@ -125,13 +126,29 @@ async def selected_row_last_checked(ins) -> str:
     return ""
 
 
+#: AMD stamps Last Checked and eligibilityresponsedate on its own clock.
+#: Observed 2026-09-30 02:55 EDT: a click stored 09/29 23:55, so the AMD day
+#: is Pacific. "Today" for idempotency is AMD's today, not the container's.
+AMD_TZ = os.environ.get("PORTAL_AMD_TZ", "America/Los_Angeles")
+
+
+def amd_today():
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    try:
+        return _dt.datetime.now(ZoneInfo(AMD_TZ)).date()
+    except Exception:
+        return _dt.date.today()
+
+
 def checked_today(last_checked: str, today=None) -> bool:
-    """True when the card's Last Checked date is today's date (AMD shows the
-    date only). Makes check_eligibility idempotent within a day: a second
-    call does not fire a second billable inquiry."""
+    """True when the card's Last Checked date is AMD's current date (the card
+    shows a date only, on AMD's clock). Makes check_eligibility idempotent
+    within AMD's day: a second call does not fire a second billable inquiry."""
     import datetime as _dt
 
-    today = today or _dt.date.today()
+    today = today or amd_today()
     try:
         return _dt.datetime.strptime((last_checked or "").strip(), "%m/%d/%Y").date() == today
     except ValueError:
@@ -458,6 +475,19 @@ async def row_last_checked(ins, insurance_index: int) -> str:
     return ""
 
 
+async def row_active_flag(ins, insurance_index: int) -> str:
+    """The A/I column (6) of coverage row ``insurance_index``: 'A' active,
+    'I' inactive, '' unknown. AMD silently ignores Check Eligibility on an
+    inactive row (observed live 2026-09-30 on an ended plan)."""
+    try:
+        loc = ins.locator(_COVERAGE_ROWS).nth(insurance_index - 1).locator("td:nth-child(6)")
+        if await loc.count():
+            return (await loc.first.inner_text()).strip().upper()[:1]
+    except Exception:
+        pass
+    return ""
+
+
 async def selected_row_comment(ins) -> str:
     """The selected row's Eligibility Comments title (AMD status text, no PHI)."""
     try:
@@ -483,10 +513,11 @@ async def check_all_coverage_rows(ins, *, force: bool = False, settle_s: int = 3
     n = await coverage_row_count(ins)
     rows: list[dict] = []
     for i in range(1, n + 1):
-        rec: dict = {"index": i, "selected": False, "blocked": False, "blocked_reason": None,
-                     "skipped": False, "fired": False, "refreshed": False,
+        rec: dict = {"index": i, "selected": False, "active_flag": "", "blocked": False,
+                     "blocked_reason": None, "skipped": False, "fired": False, "refreshed": False,
                      "last_checked_before": "", "last_checked_after": ""}
         rec["selected"] = await select_coverage_row(ins, i)
+        rec["active_flag"] = await row_active_flag(ins, i)
         rec["last_checked_before"] = await row_last_checked(ins, i)
         if not rec["selected"]:
             log.info("flow=eligibility row %s/%s not selectable; not clicked", i, n)
@@ -507,6 +538,9 @@ async def check_all_coverage_rows(ins, *, force: bool = False, settle_s: int = 3
             )
             rec["fired"] = bool(fired.get("fired"))
             rec["refreshed"] = bool(fired.get("grid_last_changed"))
+            if rec["fired"] and not rec["refreshed"]:
+                log.info("flow=eligibility row %s/%s clicked, Last Checked unchanged active_flag=%s",
+                         i, n, rec["active_flag"] or "?")
         rec["last_checked_after"] = await row_last_checked(ins, i)
         rows.append(rec)
     fired_n = sum(1 for r in rows if r["fired"])

@@ -88,14 +88,16 @@ every insurance row) for EACH row of the coverage grid
 `#tblInsCoverages tr[id^=ins]`, in grid order: click the row (it shows
 `data-selected="1"`); if AMD disables Check Eligibility / Details for that
 row it is reported blocked with a closed reason; if its Last Checked already
-shows today it is skipped (idempotent; `PORTAL_CHECK_ELIGIBILITY_FORCE=1`
-overrides); otherwise click the card's `#btnEligibilityOnDemand` and wait up
+shows AMD's current date (AMD's clock is Pacific, `PORTAL_AMD_TZ`) it is
+skipped (idempotent; `PORTAL_CHECK_ELIGIBILITY_FORCE=1` overrides); otherwise click the card's `#btnEligibilityOnDemand` and wait up
 to 30 s for that row's Last Checked to change. Clicking with no row selected
 does nothing. AMD answers asynchronously; callers confirm green from the
 stored record (`getdemographic`: `eligibilitystatusid == 1` and an advanced
 `eligibilityresponsedate`). Result carries `eligibility_rows` (one record per
-row: `index, selected, blocked, blocked_reason, skipped, fired, refreshed,
-last_checked_before, last_checked_after`), `eligibility_rows_total / _fired /
+row: `index, selected, active_flag (A/I column), blocked, blocked_reason,
+skipped, fired, refreshed, last_checked_before, last_checked_after`; AMD
+silently ignores the click on an inactive (`I`) row, so such rows show
+`fired=true, refreshed=false`), `eligibility_rows_total / _fired /
 _refreshed`, and the aggregate flags: `eligibility_click_fired` (any row),
 `eligibility_grid_refreshed` (any row), `eligibility_click_skipped` (every
 clickable row already checked today), `eligibility_blocked` (every row
