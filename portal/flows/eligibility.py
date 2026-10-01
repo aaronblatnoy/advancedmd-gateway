@@ -475,6 +475,19 @@ async def row_last_checked(ins, insurance_index: int) -> str:
     return ""
 
 
+async def row_carrier_code(ins, insurance_index: int) -> str:
+    """The Code column (2) of coverage row ``insurance_index``: AMD's carrier
+    code (UHC, BCBSFL ...). Lets the caller join a row to the stored plan it
+    is judging; not a patient identifier."""
+    try:
+        loc = ins.locator(_COVERAGE_ROWS).nth(insurance_index - 1).locator("td:nth-child(2)")
+        if await loc.count():
+            return (await loc.first.inner_text()).strip()[:20]
+    except Exception:
+        pass
+    return ""
+
+
 async def row_active_flag(ins, insurance_index: int) -> str:
     """The A/I column (6) of coverage row ``insurance_index``: 'A' active,
     'I' inactive, '' unknown. AMD silently ignores Check Eligibility on an
@@ -539,10 +552,11 @@ async def check_all_coverage_rows(ins, *, force: bool = False, settle_s: int = 3
     n = await coverage_row_count(ins)
     rows: list[dict] = []
     for i in range(1, n + 1):
-        rec: dict = {"index": i, "selected": False, "active_flag": "", "blocked": False,
+        rec: dict = {"index": i, "selected": False, "carrier_code": "", "active_flag": "", "blocked": False,
                      "blocked_reason": None, "skipped": False, "fired": False, "refreshed": False,
                      "last_checked_before": "", "last_checked_after": ""}
         rec["selected"] = await select_coverage_row(ins, i)
+        rec["carrier_code"] = await row_carrier_code(ins, i)
         rec["active_flag"] = await row_active_flag(ins, i)
         rec["last_checked_before"] = await row_last_checked(ins, i)
         if not rec["selected"]:

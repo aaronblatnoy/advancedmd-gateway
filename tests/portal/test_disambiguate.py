@@ -421,6 +421,9 @@ def _fake_grid(monkeypatch, rows, *, fire_changes=True, comment="Missing Eligibi
     async def flag(ins, idx):
         return rows[idx - 1].get("ai", "A")
 
+    async def code(ins, idx):
+        return rows[idx - 1].get("code", f"CAR{idx}")
+
     async def disabled(ins):
         calls["disabled_checks"] += 1
         return rows[state["selected"] - 1].get("blocked", False)
@@ -443,6 +446,7 @@ def _fake_grid(monkeypatch, rows, *, fire_changes=True, comment="Missing Eligibi
     monkeypatch.setattr(el, "select_coverage_row", select)
     monkeypatch.setattr(el, "row_last_checked", last)
     monkeypatch.setattr(el, "row_active_flag", flag)
+    monkeypatch.setattr(el, "row_carrier_code", code)
     monkeypatch.setattr(el, "check_eligibility_disabled", disabled)
     monkeypatch.setattr(el, "details_disabled", not_disabled)
     monkeypatch.setattr(el, "selected_row_comment", comment_of)
@@ -523,8 +527,9 @@ async def test_graph_check_mode_clicks_every_coverage_row(monkeypatch):
     assert data["eligibility_blocked"] is False and data["eligibility_outcome"] == "unverifiable"
     # Row records are closed: no free text beyond dates and closed reasons.
     assert rows[3]["active_flag"] == "I" and rows[0]["active_flag"] == "A"
-    assert set(rows[0]) == {"index", "selected", "active_flag", "blocked", "blocked_reason", "skipped",
-                            "fired", "refreshed", "last_checked_before", "last_checked_after"}
+    assert [r["carrier_code"] for r in rows] == ["CAR1", "CAR2", "CAR3", "CAR4"]
+    assert set(rows[0]) == {"index", "selected", "carrier_code", "active_flag", "blocked", "blocked_reason",
+                            "skipped", "fired", "refreshed", "last_checked_before", "last_checked_after"}
 
 
 @pytest.mark.asyncio
